@@ -1,0 +1,32 @@
+{
+	"sessionId": "REPLACE-WITH-A-UUID",
+	"systemPrompt": "",
+	"model": "claude-fable-5",
+	"workingDirectory": ".",
+	"channels": {
+		"whatsapp": {
+			"ownerJids": ["441234567890@s.whatsapp.net"],
+			"toolPrefix": "whatsapp"
+		},
+		"email": {
+			"ownerAddress": "you@example.com",
+			"query": "newer_than:2d"
+		}
+	},
+	"schedule": [
+		{
+			"id": "morning-brief",
+			"cron": "0 8 * * *",
+			"prompt": "Good morning. Anything I should know about today?"
+		}
+	],
+	"polling": {
+		"idleIntervalMs": 1000,
+		"activeIntervalMs": 1000,
+		"activeWindowMs": 120000
+	},
+	"viewer": {
+		"enabled": true,
+		"port": 4317
+	}
+}

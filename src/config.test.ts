@@ -1,0 +1,91 @@
+import {
+	describe, test, expect, beforeEach, afterEach,
+} from 'vitest';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {
+	loadConfig, defaultConfig, writeConfig, DEFAULT_SYSTEM_PROMPT,
+} from './config.js';
+
+let directory: string;
+let configPath: string;
+
+beforeEach(() => {
+	directory = mkdtempSync(join(tmpdir(), 'agent-config-'));
+	configPath = join(directory, 'agent.config.json');
+});
+
+afterEach(() => {
+	rmSync(directory, {recursive: true, force: true});
+});
+
+describe('config loading', () => {
+	test('loads a valid config', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc'});
+		const {config, warning} = loadConfig(configPath);
+		expect(config.sessionId).toBe('abc');
+		expect(warning).toBeUndefined();
+	});
+
+	// M4: the agent can break its own config; that must not kill it.
+	test('falls back to last known good when the config breaks', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'good'});
+		loadConfig(configPath); // snapshots the good copy
+
+		writeFileSync(configPath, '{ this is not json');
+		const {config, warning} = loadConfig(configPath);
+
+		expect(config.sessionId).toBe('good');
+		expect(warning).toMatch(/last known good/i);
+	});
+
+	test('falls back on a structurally invalid config', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'good'});
+		loadConfig(configPath);
+
+		writeFileSync(configPath, JSON.stringify({sessionId: ''}));
+		const {config, warning} = loadConfig(configPath);
+
+		expect(config.sessionId).toBe('good');
+		expect(warning).toBeDefined();
+	});
+
+	test('uses defaults when there is no config and no fallback', () => {
+		const {config, warning} = loadConfig(configPath);
+		expect(config.channels).toEqual({});
+		expect(warning).toMatch(/defaults/i);
+	});
+
+	test('does not overwrite the good snapshot with a broken config', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'good'});
+		loadConfig(configPath);
+
+		writeFileSync(configPath, 'broken');
+		loadConfig(configPath);
+		// Still recoverable on a subsequent load.
+		expect(loadConfig(configPath).config.sessionId).toBe('good');
+	});
+});
+
+describe('system prompt fallback', () => {
+	test('an empty systemPrompt falls back to the default', () => {
+		// Otherwise the agent never learns the reply format and every reply is
+		// silently dropped.
+		writeFileSync(configPath, JSON.stringify({
+			sessionId: 'abc',
+			workingDirectory: '/tmp',
+			systemPrompt: '',
+		}));
+		expect(loadConfig(configPath).config.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
+	});
+
+	test('a real systemPrompt is respected', () => {
+		writeFileSync(configPath, JSON.stringify({
+			sessionId: 'abc',
+			workingDirectory: '/tmp',
+			systemPrompt: 'custom',
+		}));
+		expect(loadConfig(configPath).config.systemPrompt).toBe('custom');
+	});
+});
