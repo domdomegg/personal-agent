@@ -61,6 +61,10 @@ function formatEvent(event: AgentEvent): string {
 	return `${header}${from}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
 }
 
+/** A reply is unrecoverable once dropped, so a transient failure gets retries. */
+const SEND_ATTEMPTS = 3;
+const SEND_RETRY_MS = 2000;
+
 export class Runner {
 	private child: ChildProcessWithoutNullStreams | undefined;
 
@@ -292,11 +296,27 @@ export class Runner {
 			return;
 		}
 
-		try {
-			await this.options.onOutbound(parsed);
-		} catch (error) {
-			this.options.log?.('failed to send reply', error);
+		// Retried, because a reply that fails to send is simply gone — the agent
+		// has already said it and will not say it again. One transient error from
+		// the bridge (an expired token, a proxy blip) used to cost the whole
+		// message, with only a log line to show for it.
+		for (let attempt = 1; attempt <= SEND_ATTEMPTS; attempt++) {
+			try {
+				// eslint-disable-next-line no-await-in-loop -- attempts are sequential by nature
+				await this.options.onOutbound(parsed);
+				return;
+			} catch (error) {
+				this.options.log?.('failed to send reply', {attempt, of: SEND_ATTEMPTS, error});
+				if (attempt < SEND_ATTEMPTS) {
+					// eslint-disable-next-line no-await-in-loop -- deliberate backoff
+					await new Promise((resolve) => {
+						setTimeout(resolve, SEND_RETRY_MS * attempt);
+					});
+				}
+			}
 		}
+
+		this.options.log?.('giving up on reply, message lost', {text: parsed.text.slice(0, 120)});
 	}
 }
 
