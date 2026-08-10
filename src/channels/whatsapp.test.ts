@@ -204,6 +204,73 @@ describe('whatsapp channel', () => {
 		expect(await channel.poll()).toHaveLength(0);
 	});
 
+	describe('markRead', () => {
+		function recorder() {
+			const calls: {tool: string; arguments: Record<string, unknown>}[] = [];
+			const call: McpCaller = async (tool, arguments_) => {
+				calls.push({tool, arguments: arguments_});
+				return {success: true};
+			};
+
+			return {calls, call};
+		}
+
+		test('acknowledges messages against their chat', async () => {
+			const {calls, call} = recorder();
+			const channel = createWhatsappChannel({call, cursors: cursorStore(), ownerJids: [OWNER]});
+
+			await channel.markRead!([
+				{
+					id: 'm1', channel: 'whatsapp', threadId: OWNER, text: 'one', timestamp: new Date(),
+				},
+				{
+					id: 'm2', channel: 'whatsapp', threadId: OWNER, text: 'two', timestamp: new Date(),
+				},
+			]);
+
+			expect(calls).toEqual([{
+				tool: 'whatsapp__mark_read',
+				arguments: {chat_jid: OWNER, message_ids: ['m1', 'm2']},
+			}]);
+		});
+
+		// The owner reaches the agent under more than one JID, so a single batch
+		// can span chats and cannot be sent as one call.
+		test('splits a batch spanning two chats', async () => {
+			const {calls, call} = recorder();
+			const channel = createWhatsappChannel({
+				call, cursors: cursorStore(), ownerJids: [OWNER, OWNER_LID],
+			});
+
+			await channel.markRead!([
+				{
+					id: 'm1', channel: 'whatsapp', threadId: OWNER, text: 'one', timestamp: new Date(),
+				},
+				{
+					id: 'm2', channel: 'whatsapp', threadId: OWNER_LID, text: 'two', timestamp: new Date(),
+				},
+			]);
+
+			expect(calls.map((c) => c.arguments)).toEqual([
+				{chat_jid: OWNER, message_ids: ['m1']},
+				{chat_jid: OWNER_LID, message_ids: ['m2']},
+			]);
+		});
+
+		test('honours the configured tool prefix', async () => {
+			const {calls, call} = recorder();
+			const channel = createWhatsappChannel({
+				call, cursors: cursorStore(), ownerJids: [OWNER], toolPrefix: 'whatsapp-claube',
+			});
+
+			await channel.markRead!([{
+				id: 'm1', channel: 'whatsapp', threadId: OWNER, text: 'one', timestamp: new Date(),
+			}]);
+
+			expect(calls[0]?.tool).toBe('whatsapp-claube__mark_read');
+		});
+	});
+
 	test('advances the cursor to the newest message seen', async () => {
 		// Timestamps must be in the future relative to the default first-run
 		// window, or the cursor legitimately does not move.

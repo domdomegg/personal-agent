@@ -175,6 +175,24 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 			return events;
 		},
 
+		async markRead(events) {
+			// Grouped by chat, since the bridge marks a batch within a single
+			// chat per call — and the owner may write from more than one JID.
+			const byChat = new Map<string, string[]>();
+			for (const event of events) {
+				const ids = byChat.get(event.threadId) ?? [];
+				ids.push(event.id);
+				byChat.set(event.threadId, ids);
+			}
+
+			// `sender_jid` is only required for group chats, and the owner's
+			// control chats are direct ones.
+			await Promise.all([...byChat].map(async ([chatJid, messageIds]) => call(`${tool}__mark_read`, {
+				chat_jid: chatJid,
+				message_ids: messageIds,
+			})));
+		},
+
 		async send(message) {
 			beginSend();
 			try {

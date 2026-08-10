@@ -120,6 +120,122 @@ describe('dispatcher', () => {
 
 	// A channel whose polls keep failing means messages are silently missed, so
 	// the agent is woken to investigate rather than the failure only being logged.
+	describe('read receipts', () => {
+		/** Records what it was asked to acknowledge. */
+		function readableChannel(batches: AgentEvent[][], onMark?: () => Promise<void>): {
+			channel: Channel;
+			acknowledged: string[][];
+		} {
+			const base = fakeChannel(batches);
+			const acknowledged: string[][] = [];
+			return {
+				acknowledged,
+				channel: {
+					...base,
+					async markRead(events) {
+						acknowledged.push(events.map((e) => e.id));
+						await onMark?.();
+					},
+				},
+			};
+		}
+
+		test('acknowledges dispatched events', async () => {
+			const {channel, acknowledged} = readableChannel([[event('a'), event('b')]]);
+			const dispatcher = new Dispatcher({
+				channels: [channel],
+				runner: fakeRunner(),
+				statePath: join(directory, 'state.json'),
+				polling,
+			});
+
+			await dispatcher.tick();
+			expect(acknowledged).toEqual([['a', 'b']]);
+		});
+
+		// Acknowledging a message twice would be harmless but pointless traffic,
+		// and would mean the receipt no longer tracks "newly handed to the agent".
+		test('does not acknowledge an event again on a later poll', async () => {
+			const {channel, acknowledged} = readableChannel([[event('a')], [event('a'), event('b')]]);
+			const dispatcher = new Dispatcher({
+				channels: [channel],
+				runner: fakeRunner(),
+				statePath: join(directory, 'state.json'),
+				polling,
+			});
+
+			await dispatcher.tick();
+			await dispatcher.tick();
+			expect(acknowledged).toEqual([['a'], ['b']]);
+		});
+
+		// The poll-failure alert is the harness talking to itself. Sending it back
+		// to the bridge as a read receipt would be nonsense, and its id is not a
+		// WhatsApp message id at all.
+		test('never acknowledges a synthetic poll-failure alert', async () => {
+			const acknowledged: string[][] = [];
+			const channel: Channel = {
+				id: 'broken',
+				async poll(): Promise<AgentEvent[]> {
+					throw new Error('connector down');
+				},
+				async send() {
+					// Never reached.
+				},
+				async markRead(events) {
+					acknowledged.push(events.map((e) => e.id));
+				},
+			};
+
+			const runner = fakeRunner();
+			const dispatcher = new Dispatcher({
+				channels: [channel],
+				runner,
+				statePath: join(directory, 'state.json'),
+				polling,
+			});
+
+			for (let i = 0; i < 60; i++) {
+				// eslint-disable-next-line no-await-in-loop -- ticks are sequential by nature.
+				await dispatcher.tick();
+			}
+
+			expect(runner.submitted).toHaveLength(1);
+			expect(acknowledged).toEqual([]);
+		});
+
+		// A receipt is a courtesy. Losing one must not cost the message.
+		test('dispatches normally when acknowledgement fails', async () => {
+			const {channel} = readableChannel(
+				[[event('a')]],
+				async () => {
+					throw new Error('bridge unreachable');
+				},
+			);
+
+			const logged: string[] = [];
+			const runner = fakeRunner();
+			const dispatcher = new Dispatcher({
+				channels: [channel],
+				runner,
+				statePath: join(directory, 'state.json'),
+				polling,
+				log(message) {
+					logged.push(message);
+				},
+			});
+
+			await expect(dispatcher.tick()).resolves.toBeUndefined();
+			expect(runner.submitted.map((e) => e.id)).toEqual(['a']);
+
+			// The rejection is handled asynchronously, so let it settle.
+			await new Promise((resolve) => {
+				setTimeout(resolve, 10);
+			});
+			expect(logged).toContain('failed to mark read');
+		});
+	});
+
 	describe('poll failure alerts', () => {
 		/** Fails every poll, so the failure streak is under our control. */
 		function brokenChannel(error: unknown = new Error('connector down')): Channel {

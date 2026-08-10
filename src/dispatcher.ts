@@ -112,6 +112,9 @@ export class Dispatcher {
 		const results = await Promise.allSettled(this.options.channels.map(async (channel) => channel.poll()));
 
 		const fresh: AgentEvent[] = [];
+		// Only genuine channel traffic, so the synthetic poll-failure alerts
+		// pushed into `fresh` below are never sent back as read receipts.
+		const toAcknowledge = new Map<Channel, AgentEvent[]>();
 		for (const [index, result] of results.entries()) {
 			const channelId = this.options.channels[index]?.id ?? `channel-${index}`;
 
@@ -143,6 +146,13 @@ export class Dispatcher {
 				// actions are not generally idempotent.
 				this.markSeen(event.id);
 				fresh.push(event);
+
+				const channel = this.options.channels[index];
+				if (channel?.markRead) {
+					const pending = toAcknowledge.get(channel) ?? [];
+					pending.push(event);
+					toAcknowledge.set(channel, pending);
+				}
 			}
 		}
 
@@ -169,6 +179,15 @@ export class Dispatcher {
 			this.options.log?.('dispatching', {id: event.id, channel: event.channel});
 			void this.options.runner.submit(event).catch((error: unknown) => {
 				this.options.log?.('run failed', {id: event.id, error});
+			});
+		}
+
+		// After dispatch, so a receipt means the agent has the message. Not
+		// awaited, for the same reason submit() is not: the poll loop must not
+		// stall on a network round-trip to the bridge.
+		for (const [channel, events] of toAcknowledge) {
+			void channel.markRead?.(events).catch((error: unknown) => {
+				this.options.log?.('failed to mark read', {channel: channel.id, error});
 			});
 		}
 	}

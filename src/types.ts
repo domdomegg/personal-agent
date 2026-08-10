@@ -72,6 +72,18 @@ export type Channel = {
 
 	/** Deliver a reply. */
 	send: (message: OutboundMessage) => Promise<void>;
+
+	/**
+	 * Acknowledge events as received, for channels that have such a notion —
+	 * WhatsApp's blue ticks, say. Called after the events have been handed to
+	 * the agent, so the receipt means the agent has the message rather than
+	 * merely that the harness fetched it.
+	 *
+	 * Optional, because most channels have nothing to acknowledge. Failures are
+	 * logged and otherwise ignored: a missing receipt is a cosmetic loss, and
+	 * not worth failing a run over.
+	 */
+	markRead?: ((events: AgentEvent[]) => Promise<void>) | undefined;
 };
 
 /** A cron entry: a schedule, and the prompt to run when it fires. */
