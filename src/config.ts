@@ -119,6 +119,7 @@ function parse(raw: string): Config {
 		channels: parsed.channels ?? {},
 		schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
 		model: typeof parsed.model === 'string' && parsed.model.trim() !== '' ? parsed.model : base.model,
+		fallbackModel: typeof parsed.fallbackModel === 'string' && parsed.fallbackModel.trim() !== '' ? parsed.fallbackModel : undefined,
 		polling: {...base.polling, ...parsed.polling},
 		viewer: {...base.viewer, ...parsed.viewer},
 	};

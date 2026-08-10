@@ -92,6 +92,9 @@ export type Config = {
 	/** Claude Code model. Pinned so it does not depend on when the session began. */
 	model: string;
 
+	/** Retried on once if `model` declines to answer at all. Omit to disable. */
+	fallbackModel?: string | undefined;
+
 	/** Directory Claude Code runs in — the agent's own repo, so it can edit itself (M1, M2). */
 	workingDirectory: string;
 

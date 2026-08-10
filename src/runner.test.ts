@@ -1,5 +1,5 @@
 import {describe, test, expect} from 'vitest';
-import {parseReply} from './runner.js';
+import {isRefusal, parseReply} from './runner.js';
 
 describe('parseReply', () => {
 	test('parses an addressed reply', () => {
@@ -47,5 +47,42 @@ describe('parseReply with leading narration', () => {
 
 	test('still ignores prose with no routing line at all', () => {
 		expect(parseReply('Let me think about that for a moment.')).toBeUndefined();
+	});
+});
+
+// A model declining to answer is recoverable — retry on another one. A crash
+// or an expired token is not, and must not trigger a second run.
+describe('isRefusal', () => {
+	const refusal = {
+		type: 'assistant',
+		message: {stop_reason: 'refusal', model: '<synthetic>'},
+	};
+
+	test('detects a synthetic refusal', () => {
+		expect(isRefusal(refusal)).toBe(true);
+	});
+
+	test('ignores a normal answer', () => {
+		expect(isRefusal({
+			type: 'assistant',
+			message: {stop_reason: 'end_turn', model: 'claude-fable-5'},
+		})).toBe(false);
+	});
+
+	// Matching on the model field as well as the stop reason is what keeps a
+	// real model's own refusal from being retried behind its back.
+	test('ignores a refusal that a real model actually produced', () => {
+		expect(isRefusal({
+			type: 'assistant',
+			message: {stop_reason: 'refusal', model: 'claude-fable-5'},
+		})).toBe(false);
+	});
+
+	test('ignores results, errors and malformed lines', () => {
+		expect(isRefusal({type: 'result', is_error: true})).toBe(false);
+		expect(isRefusal({type: 'user', message: {stop_reason: 'refusal', model: '<synthetic>'}})).toBe(false);
+		expect(isRefusal({type: 'assistant'})).toBe(false);
+		expect(isRefusal(undefined)).toBe(false);
+		expect(isRefusal('refusal')).toBe(false);
 	});
 });

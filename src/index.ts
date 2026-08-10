@@ -87,6 +87,7 @@ export function createAgent(options: AgentOptions): Agent {
 		sessionId: config.sessionId,
 		systemPrompt: config.systemPrompt,
 		model: config.model,
+		fallbackModel: config.fallbackModel,
 		workingDirectory: config.workingDirectory,
 		claudePath: options.claudePath,
 		lingerMs: options.lingerMs,

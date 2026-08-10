@@ -17,6 +17,8 @@ export type RunnerOptions = {
 	systemPrompt: string;
 	/** Claude Code model alias or full name, e.g. `fable` or `claude-fable-5`. */
 	model: string;
+	/** Retried on once if `model` declines to answer. Omit to disable. */
+	fallbackModel?: string | undefined;
 	workingDirectory: string;
 	/** Overridable so tests can point at a stub. */
 	claudePath?: string | undefined;
@@ -94,7 +96,7 @@ export class Runner {
 			return this.activeRun ?? Promise.resolve();
 		}
 
-		this.activeRun = this.startRun(formatEvent(event));
+		this.activeRun = this.runWithFallback(formatEvent(event));
 		return this.activeRun;
 	}
 
@@ -102,6 +104,36 @@ export class Runner {
 	stop(): void {
 		this.child?.kill('SIGTERM');
 		this.child = undefined;
+	}
+
+	/**
+	 * Runs the event, and retries once on a different model if the first model
+	 * declined to answer at all.
+	 *
+	 * Narrow by design: only a synthetic refusal retries, only once, and only
+	 * when a fallback is configured. A crash or an expired token is not worth a
+	 * second run, and 'keep trying models until one answers' is not a pattern
+	 * worth having — this exists because a model can decline routine traffic,
+	 * not to shop around for a permissive one.
+	 */
+	private async runWithFallback(text: string): Promise<void> {
+		const {model, fallbackModel} = this.options;
+		const {refused} = await this.startRun(text, model);
+		if (!refused || !fallbackModel || fallbackModel === model) {
+			if (refused) {
+				// Without a fallback the message is simply dropped, so say so
+				// rather than leaving the owner wondering why nothing came back.
+				this.options.log?.('run refused, no fallback configured', {model});
+			}
+
+			return;
+		}
+
+		this.options.log?.('run refused, retrying on fallback', {model, fallbackModel});
+		const retry = await this.startRun(text, fallbackModel);
+		if (retry.refused) {
+			this.options.log?.('fallback also refused', {model, fallbackModel});
+		}
 	}
 
 	private write(text: string): void {
@@ -112,7 +144,7 @@ export class Runner {
 		this.child?.stdin.write(`${JSON.stringify(message)}\n`);
 	}
 
-	private async startRun(initialText: string): Promise<void> {
+	private async startRun(initialText: string, model: string): Promise<{refused: boolean}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
 		// in use". Subsequent runs must --resume it instead. That resumption is
@@ -136,7 +168,7 @@ export class Runner {
 				// whenever the session happened to be created — and silently
 				// changes if it is ever recreated.
 				'--model',
-				this.options.model,
+				model,
 				'--append-system-prompt',
 				this.options.systemPrompt,
 				// `auto` lets Claude Code apply its own judgement about what needs
@@ -153,6 +185,7 @@ export class Runner {
 		this.write(initialText);
 
 		const pending: Promise<void>[] = [];
+		let refused = false;
 
 		// Claude Code keeps running while stdin is open — that is what allows an
 		// event to join a run in progress (F3). So a turn is finished when a
@@ -176,6 +209,10 @@ export class Runner {
 				parsed = JSON.parse(line);
 			} catch {
 				return;
+			}
+
+			if (isRefusal(parsed)) {
+				refused = true;
 			}
 
 			const text = extractAssistantText(parsed);
@@ -245,6 +282,8 @@ export class Runner {
 			// awaiting the run also see delivery complete.
 			await Promise.allSettled(pending);
 		}
+
+		return {refused};
 	}
 
 	private async emit(text: string): Promise<void> {
@@ -271,6 +310,34 @@ function isTurnEnd(message: unknown): boolean {
 	// Newer builds tag it `type: "result"`; older ones emit a bare object
 	// carrying `is_error` and `num_turns`.
 	return record.type === 'result' || ('is_error' in record && 'num_turns' in record);
+}
+
+/**
+ * A model declining to answer at all, as opposed to answering badly or the
+ * process dying.
+ *
+ * Claude Code reports this as a synthetic assistant message — the model field
+ * is literally `<synthetic>`, because no model produced it. Matching on that
+ * pair rather than on the message text keeps it from firing on a crash, an
+ * expired token, or a run that simply said something about refusals.
+ */
+export function isRefusal(message: unknown): boolean {
+	if (typeof message !== 'object' || message === null) {
+		return false;
+	}
+
+	const record = message as Record<string, unknown>;
+	if (record.type !== 'assistant') {
+		return false;
+	}
+
+	const inner = record.message;
+	if (typeof inner !== 'object' || inner === null) {
+		return false;
+	}
+
+	const {stop_reason: stopReason, model} = inner as Record<string, unknown>;
+	return stopReason === 'refusal' && model === '<synthetic>';
 }
 
 /** Pull assistant prose out of a stream-json line, ignoring tool calls. */
