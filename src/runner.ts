@@ -190,6 +190,7 @@ export class Runner {
 
 		const pending: Promise<void>[] = [];
 		let refused = false;
+		let compactRequested = false;
 
 		// Claude Code keeps running while stdin is open — that is what allows an
 		// event to join a run in progress (F3). So a turn is finished when a
@@ -224,6 +225,10 @@ export class Runner {
 				pending.push(this.emit(text));
 			}
 
+			if (text && wantsCompact(text)) {
+				compactRequested = true;
+			}
+
 			if (isTurnEnd(parsed)) {
 				// A run ends after a quiet period rather than on a message count:
 				// Claude Code may answer several queued messages in one turn, so
@@ -235,15 +240,32 @@ export class Runner {
 		});
 
 		let idleTimer: NodeJS.Timeout | undefined;
-		function markIdle(): void {
+		const markIdle = (): void => {
 			if (idleTimer) {
 				clearTimeout(idleTimer);
 			}
 
 			idleTimer = setTimeout(() => {
+				// Compaction is deliberately deferred to here rather than run the
+				// moment the directive is seen. Mid-turn it would be queued behind
+				// the work in progress and land in the middle of it, which is the
+				// ambush the directive exists to avoid: the point of asking is to
+				// compact at a chosen moment, not merely to compact.
+				if (compactRequested) {
+					compactRequested = false;
+					this.options.log?.('compacting on request');
+					// Sent raw, not through write(), so it reaches Claude Code as a
+					// slash command. Everything else goes through formatEvent's
+					// fence precisely so it cannot do this.
+					this.write('/compact');
+					// Not settling: the compaction produces its own turn end, which
+					// re-arms this timer with the flag now clear.
+					return;
+				}
+
 				settleTurn?.();
 			}, linger);
-		}
+		};
 
 		let stderr = '';
 		child.stderr.on('data', (chunk: Buffer) => {
@@ -393,6 +415,25 @@ function extractAssistantText(message: unknown): string | undefined {
 }
 
 /**
+ * The agent asks for its own context to be compacted by emitting a bare
+ * directive on its own line:
+ *
+ *     >>> compact
+ *
+ * Claude Code compacts on a context-size threshold by itself, so this is not
+ * about avoiding overflow. It is about *when*: an automatic compaction lands
+ * wherever the threshold happens to fall, often mid-task, whereas the agent
+ * knows when it has just finished something and is holding nothing it needs.
+ *
+ * Note this cannot be triggered by an incoming message, since every event body
+ * is wrapped by formatEvent and so never reaches Claude Code with a leading
+ * slash. Only the agent's own output is scanned for the directive.
+ */
+export function wantsCompact(text: string): boolean {
+	return /(?:^|\n)>>>[ \t]*compact[ \t]*(?:\n|$)/.test(text);
+}
+
+/**
  * The agent addresses a reply by prefixing it with a routing line, which the
  * system prompt instructs it to emit:
  *
@@ -412,7 +453,15 @@ export function parseReply(text: string): OutboundMessage | undefined {
 		return undefined;
 	}
 
-	const body = (match[3] ?? '').trim();
+	// A compact directive after the routing line is an instruction to the
+	// harness, not something the owner should have to read, so it is stripped
+	// rather than delivered. Only whole lines are removed, so prose that merely
+	// mentions the directive survives intact.
+	const body = (match[3] ?? '')
+		.split('\n')
+		.filter((line) => !/^>>>[ \t]*compact[ \t]*$/.test(line))
+		.join('\n')
+		.trim();
 	if (body === '') {
 		return undefined;
 	}

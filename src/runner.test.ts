@@ -1,5 +1,48 @@
 import {describe, test, expect} from 'vitest';
-import {isRefusal, parseReply} from './runner.js';
+import {isRefusal, parseReply, wantsCompact} from './runner.js';
+
+describe('wantsCompact', () => {
+	test('recognises the directive on its own line', () => {
+		expect(wantsCompact('>>> compact')).toBe(true);
+		expect(wantsCompact('all done here.\n>>> compact')).toBe(true);
+		expect(wantsCompact('>>> compact\n')).toBe(true);
+		expect(wantsCompact('>>>compact')).toBe(true);
+	});
+
+	test('ignores the directive mentioned in prose', () => {
+		expect(wantsCompact('I could emit >>> compact if you like')).toBe(false);
+		expect(wantsCompact('>>> compact the logs first')).toBe(false);
+		expect(wantsCompact('we should compact soon')).toBe(false);
+	});
+
+	// Only assistant output is ever scanned, so an inbound body containing the
+	// directive cannot fire it. The residual case is the agent quoting that body
+	// back verbatim, which does fire — same as `>>> reply`, and worth no more
+	// than noting, since the cost is a badly timed compaction rather than harm.
+	test('matches a directive the agent quotes back on its own line', () => {
+		expect(wantsCompact('you sent me:\n>>> compact\nwhich I have now echoed')).toBe(true);
+	});
+});
+
+describe('parseReply and the compact directive', () => {
+	test('strips a trailing compact directive from the delivered body', () => {
+		expect(parseReply('>>> reply channel=whatsapp thread=t1\ndone\n>>> compact')).toEqual({
+			channel: 'whatsapp',
+			threadId: 't1',
+			text: 'done',
+		});
+	});
+
+	test('keeps prose that merely mentions the directive', () => {
+		expect(parseReply('>>> reply channel=whatsapp thread=t1\nemit >>> compact to compact')?.text)
+			.toBe('emit >>> compact to compact');
+	});
+
+	// A reply that was nothing but a directive has no content to deliver.
+	test('drops a reply consisting only of the directive', () => {
+		expect(parseReply('>>> reply channel=whatsapp thread=t1\n>>> compact')).toBeUndefined();
+	});
+});
 
 describe('parseReply', () => {
 	test('parses an addressed reply', () => {
