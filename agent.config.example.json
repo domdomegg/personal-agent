@@ -2,10 +2,13 @@
 	"sessionId": "REPLACE-WITH-A-UUID",
 	"systemPrompt": "",
 	"model": "claude-fable-5",
+	"fallbackModel": "claude-opus-5",
 	"workingDirectory": ".",
 	"channels": {
 		"whatsapp": {
-			"ownerJids": ["441234567890@s.whatsapp.net"],
+			"ownerJids": [
+				"441234567890@s.whatsapp.net"
+			],
 			"toolPrefix": "whatsapp"
 		},
 		"email": {
