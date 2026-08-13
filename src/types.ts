@@ -46,6 +46,13 @@ export type AgentEvent = {
 	 * before it is ever constructed (S1).
 	 */
 	sender?: string | undefined;
+
+	/**
+	 * The owner's note for the watch this event came through, if any. Trusted
+	 * instruction (it comes from config, not from the message), so the runner
+	 * presents it outside the data fence.
+	 */
+	note?: string | undefined;
 };
 
 /** An outbound message the agent wants sent. */
@@ -86,6 +93,17 @@ export type Channel = {
 	markRead?: ((events: AgentEvent[]) => Promise<void>) | undefined;
 };
 
+/**
+ * A chat kept rather than discarded, and the owner's note about why. The note
+ * is deliberately unstructured: it is owner-authored prose interpreted by the
+ * agent, not configuration interpreted by the harness.
+ */
+export type WatchEntry = {
+	/** Channel-specific selector — for WhatsApp, the chat JID. */
+	chatJid: string;
+	note?: string | undefined;
+};
+
 /** A cron entry: a schedule, and the prompt to run when it fires. */
 export type ScheduleEntry = {
 	id: string;
@@ -121,6 +139,13 @@ export type Config = {
 			ownerJids: string[];
 			/** MCP server backing this channel; defaults to `whatsapp`. */
 			toolPrefix?: string | undefined;
+			/**
+			 * Chats the agent listens to without taking instructions from (S1
+			 * still holds: their content is data). The harness's whole job here
+			 * is not discarding these rows and stapling the note on; what to do
+			 * about them is decided by the agent reading the note.
+			 */
+			watches?: WatchEntry[];
 		};
 		email?: {
 			/** The owner's email address. Only mail from here is acted on (S1, S3). */
@@ -131,6 +156,13 @@ export type Config = {
 	};
 
 	schedule: ScheduleEntry[];
+
+	/**
+	 * IANA zone the cron expressions are written in, e.g. `Europe/London`.
+	 * Defaults to the system zone — which in a container is usually UTC, so a
+	 * schedule meant in local time should set this.
+	 */
+	timezone?: string | undefined;
 
 	polling: {
 		/** Cadence when nothing has happened recently, in ms. */

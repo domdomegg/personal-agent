@@ -45,7 +45,7 @@ export type RunnerOptions = {
  * that forwarded third-party content reads as data rather than instructions
  * (S2). This is a prompt-level convention, deliberately not a security control.
  */
-function formatEvent(event: AgentEvent): string {
+export function formatEvent(event: AgentEvent): string {
 	if (event.channel === 'system') {
 		// Not owner-originated and has no reply thread: this is the service
 		// telling the agent about itself, so it gets no MESSAGE fence.
@@ -58,7 +58,11 @@ function formatEvent(event: AgentEvent): string {
 
 	const from = event.sender ? `\nfrom: ${event.sender}` : '';
 
-	return `${header}${from}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
+	// The watch note is owner-authored config, not message content, so it sits
+	// outside the fence: it is instruction about the data, not part of the data.
+	const note = event.note ? `\nowner's note for this watched chat: ${event.note}` : '';
+
+	return `${header}${from}${note}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
 }
 
 /** A reply is unrecoverable once dropped, so a transient failure gets retries. */

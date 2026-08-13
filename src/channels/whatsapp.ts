@@ -1,7 +1,7 @@
 /**
  * WhatsApp channel, over the whatsapp-mcp-extended server.
  */
-import type {AgentEvent, Channel} from '../types.js';
+import type {AgentEvent, Channel, WatchEntry} from '../types.js';
 import type {McpCaller} from '../mcp.js';
 
 export type WhatsappOptions = {
@@ -34,6 +34,11 @@ export type WhatsappOptions = {
 	 * mcp-auth-wrapper profile, exposes identical tools under a different prefix.
 	 */
 	toolPrefix?: string | undefined;
+	/**
+	 * Chats to listen to without taking instructions from. Their messages become
+	 * events carrying the watch's note; they are still data, not commands (S1).
+	 */
+	watches?: WatchEntry[] | undefined;
 };
 
 type RawMessage = {
@@ -52,6 +57,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 	const tool = options.toolPrefix ?? 'whatsapp';
 
 	const ownerJids = new Set(options.ownerJids);
+	const watches = new Map((options.watches ?? []).map((watch) => [watch.chatJid, watch]));
 
 	// Ids of messages this agent sent, so its own replies are not mistaken for
 	// new instructions. Bounded: only recent sends can still be in a poll window.
@@ -149,8 +155,19 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 					continue;
 				}
 
-				// Only the owner's own chats reach the agent (S1).
-				if (!ownerJids.has(chatJid)) {
+				// Only the owner's own chats, and explicitly watched ones, reach
+				// the agent (S1). Watched chats are heard, not obeyed: the note
+				// travels with the event, and the body stays fenced as data.
+				const isOwner = ownerJids.has(chatJid);
+				const watch = isOwner ? undefined : watches.get(chatJid);
+				if (!isOwner && !watch) {
+					continue;
+				}
+
+				// In a watched chat `is_from_me` is reliable — unlike the owner's
+				// message-yourself control chat — and marks the agent's own
+				// reactions and replies coming back around.
+				if (watch && Boolean(row.is_from_me)) {
 					continue;
 				}
 
@@ -165,6 +182,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 					text,
 					timestamp: new Date(timestamp),
 					sender: typeof row.sender === 'string' ? row.sender : undefined,
+					note: watch?.note,
 				});
 			}
 
@@ -176,10 +194,16 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 		},
 
 		async markRead(events) {
+			// Only owner chats: the receipt is a signal to the owner that the
+			// agent has their message. Watched chats get no ticks — the bridge
+			// would also need per-sender receipts for groups, which this
+			// deliberately does not get into.
+			const acknowledgeable = events.filter((event) => ownerJids.has(event.threadId));
+
 			// Grouped by chat, since the bridge marks a batch within a single
 			// chat per call — and the owner may write from more than one JID.
 			const byChat = new Map<string, string[]>();
-			for (const event of events) {
+			for (const event of acknowledgeable) {
 				const ids = byChat.get(event.threadId) ?? [];
 				ids.push(event.id);
 				byChat.set(event.threadId, ids);

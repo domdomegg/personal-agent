@@ -9,6 +9,8 @@ import type {AgentEvent, ScheduleEntry} from './types.js';
 
 export type SchedulerOptions = {
 	entries: ScheduleEntry[];
+	/** IANA zone the cron expressions are evaluated in; system zone if unset. */
+	timezone?: string | undefined;
 	onFire: (event: AgentEvent) => Promise<void>;
 	log?: (message: string, detail?: unknown) => void;
 };
@@ -43,7 +45,7 @@ export class Scheduler {
 	/** Fire every entry matching `now`. Exposed for tests. */
 	async fireDue(now: Date): Promise<void> {
 		for (const entry of this.options.entries) {
-			if (!matches(entry.cron, now)) {
+			if (!matches(entry.cron, now, this.options.timezone)) {
 				continue;
 			}
 
@@ -72,22 +74,53 @@ function minuteKey(date: Date): string {
 /**
  * Standard 5-field cron: minute hour day-of-month month day-of-week.
  * Supports wildcards, lists (`1,2`), ranges (`1-5`), and step values.
+ *
+ * Evaluated against the wall clock of `timezone` when given, so "0 9 * * *"
+ * means 9am where the owner lives, not 9am in whatever zone the container
+ * happens to run (usually UTC — an hour off for most of the year in the UK).
  */
-export function matches(expression: string, date: Date): boolean {
+export function matches(expression: string, date: Date, timezone?: string): boolean {
 	const fields = expression.trim().split(/\s+/);
 	if (fields.length !== 5) {
 		return false;
 	}
 
-	const values = [
-		date.getMinutes(),
-		date.getHours(),
-		date.getDate(),
-		date.getMonth() + 1,
-		date.getDay(),
-	];
+	const values = timezone
+		? zonedValues(date, timezone)
+		: [
+			date.getMinutes(),
+			date.getHours(),
+			date.getDate(),
+			date.getMonth() + 1,
+			date.getDay(),
+		];
 
 	return fields.every((field, index) => fieldMatches(field, values[index] ?? 0));
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** The cron field values for `date` as seen on a clock in `timezone`. */
+function zonedValues(date: Date, timezone: string): number[] {
+	const parts = new Intl.DateTimeFormat('en-GB', {
+		timeZone: timezone,
+		minute: 'numeric',
+		hour: 'numeric',
+		hourCycle: 'h23',
+		day: 'numeric',
+		month: 'numeric',
+		weekday: 'short',
+	}).formatToParts(date);
+
+	const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? '';
+
+	return [
+		Number.parseInt(get('minute'), 10),
+		Number.parseInt(get('hour'), 10),
+		Number.parseInt(get('day'), 10),
+		Number.parseInt(get('month'), 10),
+		WEEKDAYS.indexOf(get('weekday')),
+	];
 }
 
 function fieldMatches(field: string, value: number): boolean {

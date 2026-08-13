@@ -133,6 +133,7 @@ export function createAgent(options: AgentOptions): Agent {
 
 	const scheduler = new Scheduler({
 		entries: config.schedule,
+		timezone: config.timezone,
 		log,
 		async onFire(event) {
 			if (dispatcher.hasSeen(event.id)) {
@@ -215,6 +216,7 @@ function buildChannels(config: Config, call: McpCaller, cursors: CursorStore): C
 			cursors,
 			ownerJids: config.channels.whatsapp.ownerJids,
 			toolPrefix: config.channels.whatsapp.toolPrefix,
+			watches: config.channels.whatsapp.watches,
 		}));
 	}
 

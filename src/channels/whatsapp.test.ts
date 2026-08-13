@@ -204,6 +204,99 @@ describe('whatsapp channel', () => {
 		expect(await channel.poll()).toHaveLength(0);
 	});
 
+	describe('watched chats', () => {
+		const GROUP = '120363000000000001@g.us';
+
+		function groupRow(id: string, content: string, sender: string, fromMe = 0) {
+			return {
+				id, chat_jid: GROUP, sender, content, timestamp: '2026-08-13T06:00:00+00:00', is_from_me: fromMe,
+			};
+		}
+
+		test('a watched chat is heard, with the note attached', async () => {
+			const call: McpCaller = async () => ({
+				result: [groupRow('g1', 'we shipped the thing!', '4479999@s.whatsapp.net')],
+			});
+
+			const channel = createWhatsappChannel({
+				call,
+				cursors: cursorStore(),
+				ownerJids: [OWNER],
+				watches: [{chatJid: GROUP, note: 'react 🔥 to shipped work'}],
+			});
+
+			const events = await channel.poll();
+			expect(events).toHaveLength(1);
+			expect(events[0]?.threadId).toBe(GROUP);
+			expect(events[0]?.note).toBe('react 🔥 to shipped work');
+		});
+
+		test('unwatched chats stay invisible', async () => {
+			const call: McpCaller = async () => ({
+				result: [groupRow('g2', 'hello', '4479999@s.whatsapp.net')],
+			});
+
+			const channel = createWhatsappChannel({call, cursors: cursorStore(), ownerJids: [OWNER]});
+			expect(await channel.poll()).toHaveLength(0);
+		});
+
+		// The agent's own reactions and replies flow back through the feed. In a
+		// watched chat is_from_me is trustworthy (it is not the owner's
+		// message-yourself chat), so use it rather than growing the sent-id set.
+		test('ignores its own messages in a watched chat', async () => {
+			const call: McpCaller = async () => ({
+				result: [groupRow('g3', 'nice one 🔥', '447579103778@s.whatsapp.net', 1)],
+			});
+
+			const channel = createWhatsappChannel({
+				call,
+				cursors: cursorStore(),
+				ownerJids: [OWNER],
+				watches: [{chatJid: GROUP}],
+			});
+
+			expect(await channel.poll()).toHaveLength(0);
+		});
+
+		test('owner chats do not pick up a note even if also watched', async () => {
+			const call: McpCaller = async () => ({
+				result: [row('m9', 'hey', '2026-08-13T06:00:00+00:00')],
+			});
+
+			const channel = createWhatsappChannel({
+				call,
+				cursors: cursorStore(),
+				ownerJids: [OWNER],
+				watches: [{chatJid: OWNER, note: 'should not appear'}],
+			});
+
+			const events = await channel.poll();
+			expect(events).toHaveLength(1);
+			expect(events[0]?.note).toBeUndefined();
+		});
+
+		test('watched-chat events get no read receipt', async () => {
+			const calls: string[] = [];
+			const call: McpCaller = async (tool) => {
+				calls.push(tool);
+				return {success: true};
+			};
+
+			const channel = createWhatsappChannel({
+				call,
+				cursors: cursorStore(),
+				ownerJids: [OWNER],
+				watches: [{chatJid: GROUP}],
+			});
+
+			await channel.markRead!([{
+				id: 'g4', channel: 'whatsapp', threadId: GROUP, text: 'x', timestamp: new Date(),
+			}]);
+
+			expect(calls).toEqual([]);
+		});
+	});
+
 	describe('markRead', () => {
 		function recorder() {
 			const calls: {tool: string; arguments: Record<string, unknown>}[] = [];

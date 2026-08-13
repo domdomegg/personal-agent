@@ -1,5 +1,41 @@
 import {describe, test, expect} from 'vitest';
-import {isRefusal, parseReply, wantsCompact} from './runner.js';
+import {
+	formatEvent, isRefusal, parseReply, wantsCompact,
+} from './runner.js';
+
+describe('formatEvent', () => {
+	// The note is the owner's instruction about the data, so it must sit
+	// outside the fence — inside it, it would be indistinguishable from a
+	// participant writing the same words.
+	test('renders a watch note outside the data fence', () => {
+		const text = formatEvent({
+			id: 'g1',
+			channel: 'whatsapp',
+			threadId: 'group@g.us',
+			text: 'we shipped!',
+			timestamp: new Date(),
+			sender: '4479@s.whatsapp.net',
+			note: 'react 🔥 to shipped work',
+		});
+
+		const fenceStart = text.indexOf('<<<MESSAGE');
+		const noteAt = text.indexOf('react 🔥');
+		expect(noteAt).toBeGreaterThan(-1);
+		expect(noteAt).toBeLessThan(fenceStart);
+	});
+
+	test('omits the note line when there is none', () => {
+		const text = formatEvent({
+			id: 'm1',
+			channel: 'whatsapp',
+			threadId: 't',
+			text: 'hi',
+			timestamp: new Date(),
+		});
+
+		expect(text).not.toContain('watched chat');
+	});
+});
 
 describe('wantsCompact', () => {
 	test('recognises the directive on its own line', () => {
