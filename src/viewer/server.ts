@@ -9,7 +9,10 @@
  * transcript is a file on disk, so watching it is enough.
  */
 import {createServer} from 'node:http';
-import {watch} from 'node:fs';
+import {
+	watch, existsSync, mkdirSync, type FSWatcher,
+} from 'node:fs';
+import {dirname, basename} from 'node:path';
 import {readTranscript, type Entry} from './transcript.js';
 import {streamPage} from './stream.js';
 
@@ -21,9 +24,43 @@ export type ViewerOptions = {
 export function startViewer(options: ViewerOptions): {close: () => void} {
 	// Bumped on every file change; clients poll it to know when to refetch.
 	let version = 0;
-	const watcher = watch(options.transcriptPath, () => {
-		version += 1;
-	});
+
+	// Claude Code writes the transcript on the session's first turn, so on a
+	// fresh session there is no file — and often no projects/ directory — when
+	// the agent comes up. Watching the file directly threw ENOENT and left the
+	// viewer dead for the whole session, which is exactly the session you most
+	// want to watch. So watch the directory and attach once the file appears.
+	const directory = dirname(options.transcriptPath);
+	const filename = basename(options.transcriptPath);
+
+	let fileWatcher: FSWatcher | undefined;
+	let directoryWatcher: FSWatcher | undefined;
+
+	const watchFile = (): void => {
+		fileWatcher = watch(options.transcriptPath, () => {
+			version += 1;
+		});
+	};
+
+	if (existsSync(options.transcriptPath)) {
+		watchFile();
+	} else {
+		mkdirSync(directory, {recursive: true});
+		directoryWatcher = watch(directory, (_event, changed) => {
+			if (fileWatcher || (changed !== null && changed !== filename)) {
+				return;
+			}
+
+			if (existsSync(options.transcriptPath)) {
+				// The file exists now: count its arrival as a change, hand over to
+				// watching it directly, and stop watching the directory.
+				version += 1;
+				watchFile();
+				directoryWatcher?.close();
+				directoryWatcher = undefined;
+			}
+		});
+	}
 
 	const server = createServer((request, response) => {
 		const url = new URL(request.url ?? '/', 'http://localhost');
@@ -39,6 +76,13 @@ export function startViewer(options: ViewerOptions): {close: () => void} {
 		}
 
 		if (url.pathname === '/api/entries') {
+			// Before the first turn there is nothing to read; an empty transcript
+			// is the honest answer, not a 500.
+			if (!existsSync(options.transcriptPath)) {
+				send(200, 'application/json', JSON.stringify({version, entries: []}));
+				return;
+			}
+
 			readTranscript(options.transcriptPath)
 				.then((entries) => {
 					send(200, 'application/json', JSON.stringify({version, entries}));
@@ -62,7 +106,8 @@ export function startViewer(options: ViewerOptions): {close: () => void} {
 
 	return {
 		close(): void {
-			watcher.close();
+			fileWatcher?.close();
+			directoryWatcher?.close();
 			server.close();
 		},
 	};
