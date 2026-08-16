@@ -4,9 +4,12 @@
 # On a fresh volume there is neither a checkout nor a Claude Code credential,
 # and the agent cannot do anything without both — every reply and every poll
 # goes through claude or call-mcp. So it waits and says so, rather than
-# crash-looping. Get a shell with `kubectl exec -it deploy/personal-agent -- bash`,
-# clone and build, run `claude` to log in, and it starts by itself. Both live on
-# the volume, so this is first boot only.
+# crash-looping. Get a shell with
+# `kubectl exec -it deploy/personal-agent-deployment -- bash` — on Adam's
+# cluster the deployment carries a -deployment suffix, and the bare name is a
+# confusing NotFound. AGENT_REPO clones the checkout below, so what is left is
+# `npm ci && npm run build`, then `claude` to log in, and it starts by itself.
+# Both live on the volume, so this is first boot only.
 set -eu
 
 HOME_DIR=/home/agent
