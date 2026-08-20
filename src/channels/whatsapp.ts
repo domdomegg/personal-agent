@@ -57,6 +57,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 	const tool = options.toolPrefix ?? 'whatsapp';
 
 	const ownerJids = new Set(options.ownerJids);
+	const ownerBareIds = new Set(options.ownerJids.map(bareId));
 	const watches = new Map((options.watches ?? []).map((watch) => [watch.chatJid, watch]));
 
 	// Ids of messages this agent sent, so its own replies are not mistaken for
@@ -164,6 +165,20 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 					continue;
 				}
 
+				// A message from the bridge's own account that this process has no
+				// record of sending — e.g. the agent calling send_message directly
+				// over MCP — is still the agent's own words, not an instruction.
+				// Without this it echoes back as a fresh owner message and wakes
+				// the agent to answer itself (seen for real on 2026-08-20). The
+				// sender check keeps the message-yourself setup working, where the
+				// owner's messages are also `is_from_me`: there the sender IS an
+				// owner JID, so they pass. Senders come back in varying forms
+				// (bare number vs full JID), hence the normalisation.
+				const sender = typeof row.sender === 'string' ? row.sender : undefined;
+				if (isOwner && Boolean(row.is_from_me) && sender && !ownerBareIds.has(bareId(sender))) {
+					continue;
+				}
+
 				// In a watched chat `is_from_me` is reliable — unlike the owner's
 				// message-yourself control chat — and marks the agent's own
 				// reactions and replies coming back around.
@@ -254,6 +269,15 @@ function readMessageId(response: unknown): string | undefined {
 
 	const value = (response as Record<string, unknown>).message_id;
 	return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * The part of a JID that identifies the account: the bridge reports senders
+ * inconsistently as bare numbers ("447...") or full JIDs ("447...@s.whatsapp.net"),
+ * so comparisons happen on the number alone.
+ */
+function bareId(jid: string): string {
+	return jid.split('@')[0] ?? jid;
 }
 
 function extractRows(response: unknown): RawMessage[] {

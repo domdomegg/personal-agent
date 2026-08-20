@@ -9,6 +9,8 @@
  * read nor set any API key.
  */
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
+import {appendFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {createInterface} from 'node:readline';
 import type {AgentEvent, OutboundMessage} from './types.js';
 
@@ -65,14 +67,54 @@ export function formatEvent(event: AgentEvent): string {
 	return `${header}${from}${note}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
 }
 
-/** A reply is unrecoverable once dropped, so a transient failure gets retries. */
-const SEND_ATTEMPTS = 3;
+/**
+ * A reply is unrecoverable once dropped, so a transient failure gets retries:
+ * exponential backoff from 2s, capped at 60s, ~3 minutes in total. The ~6s
+ * this used to allow was no match for a real outage — an evening of replies
+ * was lost to one on 2026-08-19. A reply that still fails is appended to
+ * `undelivered-replies.jsonl` so it can be recovered rather than being gone.
+ */
+const SEND_ATTEMPTS = 8;
 const SEND_RETRY_MS = 2000;
+const SEND_RETRY_CAP_MS = 60_000;
+const UNDELIVERED_FILE = 'undelivered-replies.jsonl';
+
+/**
+ * How long a wound-down child may keep running — finishing a turn, waiting on
+ * a background task — before it is presumed hung and killed. Generous because
+ * legitimate background tasks (builds, CI watches) run long; bounded because
+ * backlog events wait on the exit, and a child held open forever would leave
+ * the runner deaf.
+ */
+const WIND_DOWN_GRACE_MS = 15 * 60_000;
 
 export class Runner {
 	private child: ChildProcessWithoutNullStreams | undefined;
 
 	private activeRun: Promise<void> | undefined;
+
+	/**
+	 * True while the current child's stdin is open, i.e. an event can still
+	 * join the run by being written to it.
+	 */
+	private accepting = false;
+
+	/**
+	 * Cancels the current run's idle countdown. Set while a run is live, so an
+	 * event joining during the linger window keeps the run owned: without this,
+	 * the countdown started by the previous result fired mid-message, the
+	 * runner tore the run down while the child was still working — dropping its
+	 * replies — and the next event spawned a second child resuming the same
+	 * session concurrently, forking its context. Seen for real on 2026-08-20.
+	 */
+	private cancelIdle: (() => void) | undefined;
+
+	/**
+	 * Events that arrived after the current child's stdin closed but before it
+	 * exited. It cannot take them, and a second child would fork the session,
+	 * so they wait here for the next run.
+	 */
+	private readonly backlog: string[] = [];
 
 	/** False until the session has been created by a first run. */
 	private started: boolean;
@@ -89,29 +131,62 @@ export class Runner {
 	}
 
 	/**
-	 * Hand an event to the agent. If a run is active the event joins it;
-	 * otherwise a new run starts. Resolves when the run this event joined has
-	 * finished, so callers can await quiescence.
+	 * Hand an event to the agent. If a run is accepting input the event joins
+	 * it; if one is winding down the event queues for the run after it; only
+	 * otherwise does a new run start. Resolves when the run chain this event
+	 * joined has finished, so callers can await quiescence.
 	 */
 	// Deliberately not `async`: the write below must happen synchronously on
 	// call, so a batch of events submitted together all reach the same live run
 	// instead of trickling in a microtask later.
 	// eslint-disable-next-line @typescript-eslint/promise-function-async
 	submit(event: AgentEvent): Promise<void> {
+		const text = formatEvent(event);
+
 		if (this.child) {
-			// Joins the run in progress; the idle timer keeps it alive.
-			this.write(formatEvent(event));
+			if (this.accepting) {
+				// Joins the run in progress. Any idle countdown is cancelled: the
+				// turn is live again, and the next result re-arms it.
+				this.cancelIdle?.();
+				this.write(text);
+			} else {
+				// The child is winding down: stdin is closed but the process has
+				// not exited (it may be finishing a turn, or a background task).
+				// Writing is impossible and a second child would fork the session,
+				// so the event waits for the run after this one.
+				this.backlog.push(text);
+			}
+
 			return this.activeRun ?? Promise.resolve();
 		}
 
-		this.activeRun = this.runWithFallback(formatEvent(event));
+		this.activeRun = this.runChain(text);
 		return this.activeRun;
 	}
 
 	/** Terminate any in-flight run. Used on shutdown, not on a timeout (O5). */
 	stop(): void {
+		this.accepting = false;
 		this.child?.kill('SIGTERM');
 		this.child = undefined;
+	}
+
+	/**
+	 * Runs the event, then any events that queued while the run was winding
+	 * down, until the backlog is empty. One chain owns `activeRun` throughout,
+	 * so submit() never starts a second chain while this one lives.
+	 */
+	private async runChain(initialText: string): Promise<void> {
+		try {
+			let texts = [initialText];
+			while (texts.length > 0) {
+				// eslint-disable-next-line no-await-in-loop -- runs are sequential by design (F4)
+				await this.runWithFallback(texts);
+				texts = this.backlog.splice(0);
+			}
+		} finally {
+			this.activeRun = undefined;
+		}
 	}
 
 	/**
@@ -124,9 +199,9 @@ export class Runner {
 	 * worth having — this exists because a model can decline routine traffic,
 	 * not to shop around for a permissive one.
 	 */
-	private async runWithFallback(text: string): Promise<void> {
+	private async runWithFallback(texts: string[]): Promise<void> {
 		const {model, fallbackModel} = this.options;
-		const {refused} = await this.startRun(text, model);
+		const {refused} = await this.startRun(texts, model);
 		if (!refused || !fallbackModel || fallbackModel === model) {
 			if (refused) {
 				// Without a fallback the message is simply dropped, so say so
@@ -138,7 +213,7 @@ export class Runner {
 		}
 
 		this.options.log?.('run refused, retrying on fallback', {model, fallbackModel});
-		const retry = await this.startRun(text, fallbackModel);
+		const retry = await this.startRun(texts, fallbackModel);
 		if (retry.refused) {
 			this.options.log?.('fallback also refused', {model, fallbackModel});
 		}
@@ -152,7 +227,7 @@ export class Runner {
 		this.child?.stdin.write(`${JSON.stringify(message)}\n`);
 	}
 
-	private async startRun(initialText: string, model: string): Promise<{refused: boolean}> {
+	private async startRun(initialTexts: string[], model: string): Promise<{refused: boolean}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
 		// in use". Subsequent runs must --resume it instead. That resumption is
@@ -190,7 +265,10 @@ export class Runner {
 		);
 
 		this.child = child;
-		this.write(initialText);
+		this.accepting = true;
+		for (const text of initialTexts) {
+			this.write(text);
+		}
 
 		const pending: Promise<void>[] = [];
 		let refused = false;
@@ -267,8 +345,23 @@ export class Runner {
 					return;
 				}
 
+				// The quiet period has passed with no event joining, so the run
+				// winds down. stdin closes here — in the same tick the flag flips —
+				// so a submit() racing this callback either cancelled the timer
+				// first or sees `accepting` false and queues for the next run.
+				this.accepting = false;
+				child.stdin.end();
 				settleTurn?.();
 			}, linger);
+		};
+
+		// An event joining the run cancels the countdown: the turn is live again,
+		// and the result it eventually produces re-arms the timer via markIdle.
+		this.cancelIdle = () => {
+			if (idleTimer) {
+				clearTimeout(idleTimer);
+				idleTimer = undefined;
+			}
 		};
 
 		let stderr = '';
@@ -288,15 +381,33 @@ export class Runner {
 			// follow-up arriving in the meantime keeps the run alive.
 			await Promise.race([turnFinished, exited]);
 		} finally {
-			if (idleTimer) {
-				clearTimeout(idleTimer);
+			this.cancelIdle?.();
+			this.cancelIdle = undefined;
+
+			// The idle path has already closed stdin; this is for the crash path.
+			if (this.accepting) {
+				this.accepting = false;
+				child.stdin.end();
 			}
 
-			this.child = undefined;
-			this.activeRun = undefined;
-
-			child.stdin.end();
+			// The child stays owned until it actually exits: after stdin closes it
+			// may still be finishing a turn or waiting on a background task, and
+			// its output — task-notification turns included — must keep being
+			// read. Releasing it at turn end instead let a new event spawn a
+			// second child resuming the same session concurrently.
+			//
+			// Bounded, because backlog events wait on this exit: a child held open
+			// by a hung call would otherwise leave the runner deaf for good. The
+			// grace is generous since legitimate background tasks (builds, CI
+			// watches) can run long.
+			const graceTimer = setTimeout(() => {
+				this.options.log?.('child still alive after wind-down grace, killing', {model});
+				child.kill('SIGTERM');
+			}, WIND_DOWN_GRACE_MS);
 			const code = await exited.catch(() => -1);
+			clearTimeout(graceTimer);
+			this.child = undefined;
+
 			if (code === 0) {
 				// Only now is the session known to exist, so later runs resume it.
 				if (!this.started) {
@@ -336,13 +447,24 @@ export class Runner {
 				if (attempt < SEND_ATTEMPTS) {
 					// eslint-disable-next-line no-await-in-loop -- deliberate backoff
 					await new Promise((resolve) => {
-						setTimeout(resolve, SEND_RETRY_MS * attempt);
+						setTimeout(resolve, Math.min(SEND_RETRY_MS * (2 ** (attempt - 1)), SEND_RETRY_CAP_MS));
 					});
 				}
 			}
 		}
 
 		this.options.log?.('giving up on reply, message lost', {text: parsed.text.slice(0, 120)});
+
+		// Durable last resort: the next run (or the owner, or a future me) can
+		// read what should have been said and decide whether to resend it.
+		try {
+			appendFileSync(
+				join(this.options.workingDirectory, UNDELIVERED_FILE),
+				`${JSON.stringify({...parsed, failedAt: new Date().toISOString()})}\n`,
+			);
+		} catch (error) {
+			this.options.log?.('could not record undelivered reply', error);
+		}
 	}
 }
 
