@@ -27,12 +27,21 @@ type StubOptions = {
 	exitDelayMs?: number;
 	/** File the stub appends `spawn`/`exit` lines to. */
 	logPath: string;
+	/**
+	 * `ack` answers everything; `nudge-only` stays silent until the runner's
+	 * reply-check notice arrives; `mute` never answers at all. The silent modes
+	 * stand in for the agent absorbed in a task, finishing its turn without
+	 * replying — the 2026-08-20 dropped-question failure.
+	 */
+	mode?: 'ack' | 'nudge-only' | 'mute';
+	/** File the stub appends `msg`/`nudge` per received user message, if set. */
+	recvLogPath?: string;
 };
 
 /**
- * A stub Claude Code: answers every user message with an addressed ack and a
- * result line, and records its own spawn and exit so tests can assert that
- * two of it never ran at once.
+ * A stub Claude Code: emits a result line for every user message (and, mode
+ * permitting, an addressed reply first), and records its own spawn and exit so
+ * tests can assert that two of it never ran at once.
  */
 function stubClaude(options: StubOptions): string {
 	const directory = mkdtempSync(join(tmpdir(), 'claude-stub-'));
@@ -43,6 +52,8 @@ const {createInterface} = require('node:readline');
 const DELAY = ${options.delayMs ?? 0};
 const EXIT_DELAY = ${options.exitDelayMs ?? 0};
 const LOG = ${JSON.stringify(options.logPath)};
+const MODE = ${JSON.stringify(options.mode ?? 'ack')};
+const RECV_LOG = ${JSON.stringify(options.recvLogPath ?? '')};
 appendFileSync(LOG, 'spawn ' + process.pid + ' ' + Date.now() + '\\n');
 const rl = createInterface({input: process.stdin});
 let queue = Promise.resolve();
@@ -51,12 +62,23 @@ rl.on('line', (line) => {
 	let message;
 	try { message = JSON.parse(line); } catch { return; }
 	if (message.type !== 'user') return;
+	const text = (message.message.content ?? []).map((b) => b.text ?? '').join('');
+	const isNudge = text.includes('Reply check');
+	if (RECV_LOG) appendFileSync(RECV_LOG, (isNudge ? 'nudge' : 'msg') + '\\n');
 	n += 1;
 	const i = n;
+	const answer = MODE === 'ack' || (MODE === 'nudge-only' && isNudge);
 	queue = queue.then(async () => {
 		if (DELAY) await new Promise((r) => setTimeout(r, DELAY));
-		process.stdout.write(JSON.stringify({type: 'assistant', message: {content: [{type: 'text', text: '>>> reply channel=whatsapp thread=t\\nack ' + i}]}}) + '\\n');
-		process.stdout.write(JSON.stringify({type: 'result', is_error: false, num_turns: 1}) + '\\n');
+		// One write, one chunk: the runner handles a turn's reply and its
+		// result back-to-back, leaving no gap for the test's own submissions
+		// to interleave into and make orderings flaky.
+		const lines = [];
+		if (answer) {
+			lines.push(JSON.stringify({type: 'assistant', message: {content: [{type: 'text', text: '>>> reply channel=whatsapp thread=t\\nack ' + i}]}}));
+		}
+		lines.push(JSON.stringify({type: 'result', is_error: false, num_turns: 1}));
+		process.stdout.write(lines.join('\\n') + '\\n');
 	});
 });
 rl.on('close', () => {
@@ -71,13 +93,14 @@ rl.on('close', () => {
 	return path;
 }
 
-function makeEvent(text: string): AgentEvent {
+function makeEvent(text: string, note?: string): AgentEvent {
 	return {
 		id: randomUUID(),
 		channel: 'whatsapp',
 		threadId: 't',
 		text,
 		timestamp: new Date(),
+		note,
 	};
 }
 
@@ -130,11 +153,15 @@ describe('run lifecycle', () => {
 	test('children never overlap, whenever events arrive', async () => {
 		const scratch = mkdtempSync(join(tmpdir(), 'runner-lifecycle-'));
 		const logPath = join(scratch, 'lifecycle.log');
+		const recvLogPath = join(scratch, 'recv.log');
 		writeFileSync(logPath, '');
+		writeFileSync(recvLogPath, '');
 		// Work takes 250ms, well past the 100ms linger; the stub also lingers
 		// 300ms after stdin closes, standing in for a background task holding
 		// the process open — the window that used to fork the session.
-		const claudePath = stubClaude({delayMs: 250, exitDelayMs: 300, logPath});
+		const claudePath = stubClaude({
+			delayMs: 250, exitDelayMs: 300, logPath, recvLogPath,
+		});
 		const sent: OutboundMessage[] = [];
 		const runner = makeRunner(claudePath, sent, 100);
 
@@ -170,6 +197,9 @@ describe('run lifecycle', () => {
 			expect(line.kind).toBe(index % 2 === 0 ? 'spawn' : 'exit');
 		}
 
+		// Three real messages and no reply-check: everything was answered
+		// promptly, so the nudge machinery stayed out of the way.
+		expect(readFileSync(recvLogPath, 'utf8').trim().split('\n')).toEqual(['msg', 'msg', 'msg']);
 		expect(sent.map((m) => m.text)).toEqual(['ack 1', 'ack 2', 'ack 1']);
 	});
 
@@ -197,5 +227,71 @@ describe('run lifecycle', () => {
 		expect(sent).toHaveLength(2);
 		const lines = lifecycle(logPath);
 		expect(lines.map((l) => l.kind)).toEqual(['spawn', 'exit', 'spawn', 'exit']);
+	});
+
+	// The 2026-08-20 dropped-question failure: a message joined a busy run,
+	// the turn ended without answering it, and the run closed leaving the
+	// owner staring at silence. The runner must not wind down past an
+	// unanswered message without challenging it once.
+	test('an unanswered message gets a reply-check nudge before wind-down', async () => {
+		const scratch = mkdtempSync(join(tmpdir(), 'runner-lifecycle-'));
+		const logPath = join(scratch, 'lifecycle.log');
+		const recvLogPath = join(scratch, 'recv.log');
+		writeFileSync(logPath, '');
+		writeFileSync(recvLogPath, '');
+		const claudePath = stubClaude({
+			logPath, recvLogPath, mode: 'nudge-only', exitDelayMs: 50,
+		});
+		const sent: OutboundMessage[] = [];
+		const runner = makeRunner(claudePath, sent, 60);
+
+		await runner.submit(makeEvent('needs an answer'));
+
+		// The stub ignored the message, got nudged at wind-down, and answered
+		// the nudge — all within one child.
+		const received = readFileSync(recvLogPath, 'utf8').trim().split('\n');
+		expect(received).toEqual(['msg', 'nudge']);
+		expect(sent.map((m) => m.text)).toEqual(['ack 2']);
+		expect(lifecycle(logPath).map((l) => l.kind)).toEqual(['spawn', 'exit']);
+	});
+
+	test('a run still winds down when even the nudge goes unanswered', async () => {
+		const scratch = mkdtempSync(join(tmpdir(), 'runner-lifecycle-'));
+		const logPath = join(scratch, 'lifecycle.log');
+		const recvLogPath = join(scratch, 'recv.log');
+		writeFileSync(logPath, '');
+		writeFileSync(recvLogPath, '');
+		const claudePath = stubClaude({
+			logPath, recvLogPath, mode: 'mute', exitDelayMs: 50,
+		});
+		const sent: OutboundMessage[] = [];
+		const runner = makeRunner(claudePath, sent, 60);
+
+		// Resolving at all is the point: one nudge, not a nag loop holding the
+		// run open forever.
+		await runner.submit(makeEvent('into the void'));
+
+		const received = readFileSync(recvLogPath, 'utf8').trim().split('\n');
+		expect(received).toEqual(['msg', 'nudge']);
+		expect(sent).toHaveLength(0);
+	});
+
+	test('watched-chat messages are heard without demanding a reply', async () => {
+		const scratch = mkdtempSync(join(tmpdir(), 'runner-lifecycle-'));
+		const logPath = join(scratch, 'lifecycle.log');
+		const recvLogPath = join(scratch, 'recv.log');
+		writeFileSync(logPath, '');
+		writeFileSync(recvLogPath, '');
+		const claudePath = stubClaude({
+			logPath, recvLogPath, mode: 'mute', exitDelayMs: 50,
+		});
+		const sent: OutboundMessage[] = [];
+		const runner = makeRunner(claudePath, sent, 60);
+
+		await runner.submit(makeEvent('background chatter', 'summarise weekly'));
+
+		const received = readFileSync(recvLogPath, 'utf8').trim().split('\n');
+		expect(received).toEqual(['msg']);
+		expect(sent).toHaveLength(0);
 	});
 });

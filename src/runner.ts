@@ -114,7 +114,24 @@ export class Runner {
 	 * exited. It cannot take them, and a second child would fork the session,
 	 * so they wait here for the next run.
 	 */
-	private readonly backlog: string[] = [];
+	private readonly backlog: AgentEvent[] = [];
+
+	/**
+	 * Owner messages given to the current run that no reply has yet been
+	 * addressed to, keyed by event id. A run is not allowed to wind down while
+	 * one of these is unanswered: it gets a reply-check notice first. This is
+	 * the guard against the failure of 2026-08-20, where a question joining a
+	 * run mid-task was simply never answered — the model finished the task it
+	 * was absorbed in, summarised, and the run closed with the message dropped
+	 * on the floor.
+	 */
+	private readonly outstanding = new Map<string, {
+		channel: string;
+		threadId: string;
+		at: string;
+		snippet: string;
+		nudged: boolean;
+	}>();
 
 	/** False until the session has been created by a first run. */
 	private started: boolean;
@@ -141,26 +158,24 @@ export class Runner {
 	// instead of trickling in a microtask later.
 	// eslint-disable-next-line @typescript-eslint/promise-function-async
 	submit(event: AgentEvent): Promise<void> {
-		const text = formatEvent(event);
-
 		if (this.child) {
 			if (this.accepting) {
 				// Joins the run in progress. Any idle countdown is cancelled: the
 				// turn is live again, and the next result re-arms it.
 				this.cancelIdle?.();
-				this.write(text);
+				this.dispatch(event);
 			} else {
 				// The child is winding down: stdin is closed but the process has
 				// not exited (it may be finishing a turn, or a background task).
 				// Writing is impossible and a second child would fork the session,
 				// so the event waits for the run after this one.
-				this.backlog.push(text);
+				this.backlog.push(event);
 			}
 
 			return this.activeRun ?? Promise.resolve();
 		}
 
-		this.activeRun = this.runChain(text);
+		this.activeRun = this.runChain(event);
 		return this.activeRun;
 	}
 
@@ -176,13 +191,13 @@ export class Runner {
 	 * down, until the backlog is empty. One chain owns `activeRun` throughout,
 	 * so submit() never starts a second chain while this one lives.
 	 */
-	private async runChain(initialText: string): Promise<void> {
+	private async runChain(initialEvent: AgentEvent): Promise<void> {
 		try {
-			let texts = [initialText];
-			while (texts.length > 0) {
+			let events = [initialEvent];
+			while (events.length > 0) {
 				// eslint-disable-next-line no-await-in-loop -- runs are sequential by design (F4)
-				await this.runWithFallback(texts);
-				texts = this.backlog.splice(0);
+				await this.runWithFallback(events);
+				events = this.backlog.splice(0);
 			}
 		} finally {
 			this.activeRun = undefined;
@@ -199,9 +214,9 @@ export class Runner {
 	 * worth having — this exists because a model can decline routine traffic,
 	 * not to shop around for a permissive one.
 	 */
-	private async runWithFallback(texts: string[]): Promise<void> {
+	private async runWithFallback(events: AgentEvent[]): Promise<void> {
 		const {model, fallbackModel} = this.options;
-		const {refused} = await this.startRun(texts, model);
+		const {refused} = await this.startRun(events, model);
 		if (!refused || !fallbackModel || fallbackModel === model) {
 			if (refused) {
 				// Without a fallback the message is simply dropped, so say so
@@ -213,7 +228,7 @@ export class Runner {
 		}
 
 		this.options.log?.('run refused, retrying on fallback', {model, fallbackModel});
-		const retry = await this.startRun(texts, fallbackModel);
+		const retry = await this.startRun(events, fallbackModel);
 		if (retry.refused) {
 			this.options.log?.('fallback also refused', {model, fallbackModel});
 		}
@@ -227,7 +242,35 @@ export class Runner {
 		this.child?.stdin.write(`${JSON.stringify(message)}\n`);
 	}
 
-	private async startRun(initialTexts: string[], model: string): Promise<{refused: boolean}> {
+	/**
+	 * Write an event into the live child, and if it is the kind of message that
+	 * deserves an answer, remember that it has not had one yet. Scheduled
+	 * firings and system notices carry no expectant human; watched-chat
+	 * messages are heard, not conversed with, so none of those are tracked.
+	 */
+	private dispatch(event: AgentEvent): void {
+		this.write(formatEvent(event));
+		if (event.channel !== 'system' && event.channel !== 'schedule' && !event.note) {
+			this.outstanding.set(event.id, {
+				channel: event.channel,
+				threadId: event.threadId,
+				at: event.timestamp.toISOString(),
+				snippet: event.text.slice(0, 140),
+				nudged: false,
+			});
+		}
+	}
+
+	/** A reply addressed to a thread settles every open message on it. */
+	private settleReplies(reply: OutboundMessage): void {
+		for (const [id, entry] of this.outstanding) {
+			if (entry.channel === reply.channel && entry.threadId === reply.threadId) {
+				this.outstanding.delete(id);
+			}
+		}
+	}
+
+	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{refused: boolean}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
 		// in use". Subsequent runs must --resume it instead. That resumption is
@@ -266,8 +309,11 @@ export class Runner {
 
 		this.child = child;
 		this.accepting = true;
-		for (const text of initialTexts) {
-			this.write(text);
+		// Whatever an earlier run left unanswered was already nudged about and
+		// logged; carrying it into this run would nag about stale traffic.
+		this.outstanding.clear();
+		for (const event of initialEvents) {
+			this.dispatch(event);
 		}
 
 		const pending: Promise<void>[] = [];
@@ -322,12 +368,52 @@ export class Runner {
 		});
 
 		let idleTimer: NodeJS.Timeout | undefined;
+		// Guards against a countdown that already expired when it was cancelled:
+		// clearTimeout on a fired timer is a no-op, its callback is queued and
+		// runs anyway, and would nudge about — or wind down past — a message
+		// that joined the run in the same beat. A stale epoch aborts it instead.
+		let idleEpoch = 0;
 		const markIdle = (): void => {
+			idleEpoch += 1;
+			const epoch = idleEpoch;
 			if (idleTimer) {
 				clearTimeout(idleTimer);
 			}
 
 			idleTimer = setTimeout(() => {
+				if (epoch !== idleEpoch) {
+					return;
+				}
+
+				// A message that never got a reply blocks the wind-down, once: the
+				// agent absorbed in a task can finish its turn without answering a
+				// question that joined mid-run, and by then the human is staring at
+				// silence. The check lives here — not at result time — because a
+				// turn may legitimately end several times before the reply comes.
+				// One nudge per message, so a deliberate non-reply (stated to the
+				// notice) lets the run close rather than looping forever.
+				const unanswered = [...this.outstanding.values()].filter((entry) => !entry.nudged);
+				if (unanswered.length > 0) {
+					for (const entry of unanswered) {
+						entry.nudged = true;
+					}
+
+					this.options.log?.('nudging: messages without replies', {count: unanswered.length});
+					// The check can rarely fire while a reply is already underway
+					// (a message landing in the beat between a reply and its
+					// result), so the wording allows "already handled" as an
+					// answer rather than presuming neglect.
+					this.write([
+						'[system notice]',
+						'Reply check — no reply has been seen for these messages this run:',
+						...unanswered.map((entry) => `- ${entry.channel} thread ${entry.threadId} at ${entry.at}: "${entry.snippet}"`),
+						'Reply to each now with the >>> reply directive. If one is already handled or genuinely needs no reply, say so explicitly and finish.',
+					].join('\n'));
+					// Not settling: the notice produces its own turn end, which
+					// re-arms this timer — by then the replies should be through.
+					return;
+				}
+
 				// Compaction is deliberately deferred to here rather than run the
 				// moment the directive is seen. Mid-turn it would be queued behind
 				// the work in progress and land in the middle of it, which is the
@@ -358,6 +444,7 @@ export class Runner {
 		// An event joining the run cancels the countdown: the turn is live again,
 		// and the result it eventually produces re-arms the timer via markIdle.
 		this.cancelIdle = () => {
+			idleEpoch += 1;
 			if (idleTimer) {
 				clearTimeout(idleTimer);
 				idleTimer = undefined;
@@ -418,6 +505,13 @@ export class Runner {
 				this.options.log?.('run exited non-zero', {code, stderr: stderr.slice(0, 2000)});
 			}
 
+			// A message still open after its nudge was consciously left unanswered
+			// or genuinely dropped; either way it should be visible in the logs
+			// rather than silently forgotten when the next run clears the slate.
+			if (this.outstanding.size > 0) {
+				this.options.log?.('run ended with unanswered messages', [...this.outstanding.values()]);
+			}
+
 			rl.close();
 			// Replies are dispatched as they stream in; wait for them so callers
 			// awaiting the run also see delivery complete.
@@ -432,6 +526,11 @@ export class Runner {
 		if (!parsed) {
 			return;
 		}
+
+		// Settled at the moment the agent addresses the thread, not on delivery:
+		// the reply-check guards against the agent failing to answer, while
+		// delivery failures have their own retries and durable fallback below.
+		this.settleReplies(parsed);
 
 		// Retried, because a reply that fails to send is simply gone — the agent
 		// has already said it and will not say it again. One transient error from
