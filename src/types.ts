@@ -53,6 +53,14 @@ export type AgentEvent = {
 	 * presents it outside the data fence.
 	 */
 	note?: string | undefined;
+
+	/**
+	 * Channel-authored description of media attached to the message, including
+	 * whatever the agent needs to fetch the actual bytes (tool name, ids).
+	 * Harness-generated, never message content, so the runner presents it
+	 * outside the data fence — a body claiming an attachment stays data.
+	 */
+	attachment?: string | undefined;
 };
 
 /** An outbound message the agent wants sent. */

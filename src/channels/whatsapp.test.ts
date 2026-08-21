@@ -204,6 +204,44 @@ describe('whatsapp channel', () => {
 		expect(await channel.poll()).toHaveLength(0);
 	});
 
+	// A photo usually arrives with no caption at all. The empty-text skip
+	// above silently dropped those — the owner's delivery-tracking screenshot
+	// of 2026-08-21 never reached the agent.
+	test('a captionless image still becomes an event, with a fetchable pointer', async () => {
+		const call: McpCaller = async () => ({
+			result: [{
+				...row('m4', '', '2026-08-07T00:10:00+00:00'),
+				media_type: 'image',
+				filename: 'photo_1.jpg',
+			}],
+		});
+
+		const channel = createWhatsappChannel({call, cursors: cursorStore(), ownerJids: [OWNER]});
+		const events = await channel.poll();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.text).toBe('');
+		expect(events[0]?.attachment).toContain('image photo_1.jpg');
+		expect(events[0]?.attachment).toContain('message_id=m4');
+		expect(events[0]?.attachment).toContain(`chat_jid=${OWNER}`);
+	});
+
+	test('a caption travels with its attachment', async () => {
+		const call: McpCaller = async () => ({
+			result: [{
+				...row('m5', 'does this look right?', '2026-08-07T00:10:00+00:00'),
+				media_type: 'image',
+			}],
+		});
+
+		const channel = createWhatsappChannel({call, cursors: cursorStore(), ownerJids: [OWNER]});
+		const events = await channel.poll();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.text).toBe('does this look right?');
+		expect(events[0]?.attachment).toContain('message_id=m5');
+	});
+
 	describe('watched chats', () => {
 		const GROUP = '120363000000000001@g.us';
 

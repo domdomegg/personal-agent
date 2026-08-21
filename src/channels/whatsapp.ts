@@ -48,6 +48,8 @@ type RawMessage = {
 	content?: unknown;
 	timestamp?: unknown;
 	is_from_me?: unknown;
+	media_type?: unknown;
+	filename?: unknown;
 };
 
 export const WHATSAPP_CHANNEL_ID = 'whatsapp';
@@ -186,7 +188,18 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 					continue;
 				}
 
-				if (text.trim() === '') {
+				// A photo or document usually arrives with no caption at all, and
+				// an empty-text skip silently dropped it — the owner's delivery
+				// screenshot on 2026-08-21 reached the agent as nothing. Media
+				// messages instead carry an attachment pointer with the ids the
+				// agent needs to fetch the actual bytes over MCP.
+				const mediaType = typeof row.media_type === 'string' && row.media_type !== '' ? row.media_type : undefined;
+				const filename = typeof row.filename === 'string' && row.filename !== '' ? row.filename : undefined;
+				const attachment = mediaType
+					? `${mediaType}${filename ? ` ${filename}` : ''} — fetch with the WhatsApp download_media tool, message_id=${id} chat_jid=${chatJid}`
+					: undefined;
+
+				if (text.trim() === '' && !attachment) {
 					continue;
 				}
 
@@ -198,6 +211,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 					timestamp: new Date(timestamp),
 					sender: typeof row.sender === 'string' ? row.sender : undefined,
 					note: watch?.note,
+					attachment,
 				});
 			}
 

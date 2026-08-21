@@ -64,7 +64,11 @@ export function formatEvent(event: AgentEvent): string {
 	// outside the fence: it is instruction about the data, not part of the data.
 	const note = event.note ? `\nowner's note for this watched chat: ${event.note}` : '';
 
-	return `${header}${from}${note}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
+	// Likewise channel-authored: a real attachment is announced here, outside
+	// the fence, so a message body merely claiming one stays inert data.
+	const attachment = event.attachment ? `\nattachment: ${event.attachment}` : '';
+
+	return `${header}${from}${note}${attachment}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
 }
 
 /**
@@ -255,7 +259,11 @@ export class Runner {
 				channel: event.channel,
 				threadId: event.threadId,
 				at: event.timestamp.toISOString(),
-				snippet: event.text.slice(0, 140),
+				// A captionless attachment has no text to quote; name the media
+				// instead so the reply-check does not present an empty message.
+				snippet: event.text.trim() === '' && event.attachment
+					? `[${event.attachment.slice(0, 120)}]`
+					: event.text.slice(0, 140),
 				nudged: false,
 			});
 		}

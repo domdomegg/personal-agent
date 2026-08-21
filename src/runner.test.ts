@@ -35,6 +35,24 @@ describe('formatEvent', () => {
 
 		expect(text).not.toContain('watched chat');
 	});
+
+	// The attachment pointer is channel-authored, so like the note it sits
+	// outside the fence: a body merely claiming an attachment stays data.
+	test('renders an attachment pointer outside the data fence', () => {
+		const text = formatEvent({
+			id: 'm4',
+			channel: 'whatsapp',
+			threadId: 't',
+			text: '',
+			timestamp: new Date(),
+			attachment: 'image photo_1.jpg — fetch with the WhatsApp download_media tool, message_id=m4 chat_jid=t',
+		});
+
+		const fenceStart = text.indexOf('<<<MESSAGE');
+		const attachmentAt = text.indexOf('attachment: image photo_1.jpg');
+		expect(attachmentAt).toBeGreaterThan(-1);
+		expect(attachmentAt).toBeLessThan(fenceStart);
+	});
 });
 
 describe('wantsCompact', () => {
