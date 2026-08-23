@@ -34,25 +34,23 @@ export function streamPage(): string {
   nav a:hover { color: var(--text); }
   .status { margin-left: auto; color: var(--dim); display: flex; align-items: center; gap: 8px; }
 
-  /* Clawd: three states — working (typing), idle (asleep), offline (grey). */
-  #clawd { width: 34px; height: 26px; overflow: visible; }
-  #clawd .body { transform-origin: 17px 18px; }
-  #clawd .claw { transform-origin: center; }
-  #clawd .eye-open { display: none; } #clawd .eye-shut { display: none; }
-  #clawd .zzz { display: none; fill: var(--dim); font-size: 7px; }
+  /* Clawd: the official Claude Code pixel sprite (16x14, squares only),
+     three states — working (paintbrush wave, the sprite's own two-frame
+     animation), idle (eyes shut + zzz), offline (grey). No transforms:
+     sub-pixel motion blurs pixel art, so state changes swap pixels instead. */
+  #clawd { width: 30px; height: 26px; overflow: visible; }
+  #clawd .eye-open, #clawd .eye-shut, #clawd .f0, #clawd .f1 { display: none; }
+  #clawd .zzz { display: none; fill: var(--dim); font-size: 3.6px; }
   .st-working #clawd .eye-open { display: block; }
-  .st-working #clawd .claw.l { animation: tap .5s ease-in-out infinite; }
-  .st-working #clawd .claw.r { animation: tap .5s ease-in-out .25s infinite; }
-  .st-working #clawd .body { animation: bob 1.2s ease-in-out infinite; }
+  .st-working #clawd .f0 { display: block; animation: wave0 .84s linear infinite; }
+  .st-working #clawd .f1 { display: block; animation: wave1 .84s linear infinite; }
   .st-idle #clawd .eye-shut { display: block; }
-  .st-idle #clawd .body { animation: breathe 3.4s ease-in-out infinite; }
   .st-idle #clawd .zzz { display: block; animation: floatz 3.4s ease-in-out infinite; }
   .st-offline #clawd { filter: grayscale(1); opacity: .45; }
   .st-offline #clawd .eye-shut { display: block; }
-  @keyframes tap { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2.2px); } }
-  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-.8px); } }
-  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
-  @keyframes floatz { 0% { opacity: 0; transform: translateY(2px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px); } }
+  @keyframes wave0 { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes wave1 { 0%, 49% { opacity: 0; } 50%, 100% { opacity: 1; } }
+  @keyframes floatz { 0% { opacity: 0; transform: translateY(.8px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-1.6px); } }
 
   /* Jump-to-latest: only shown when scrolled away from the bottom. */
   #jump {
@@ -96,26 +94,35 @@ export function streamPage(): string {
   <h1>AGENT</h1>
   <nav><a href="/connect">connect</a></nav>
   <span class="status">
-    <svg id="clawd" viewBox="0 0 34 26" aria-hidden="true">
-      <g class="body">
-        <!-- claws -->
-        <g class="claw l"><circle cx="5.5" cy="14" r="3.6" fill="#da7756"/><path d="M3.2 12.2 A3.6 3.6 0 0 1 7.8 12.2 L5.5 14.6 Z" fill="var(--bg)"/></g>
-        <g class="claw r"><circle cx="28.5" cy="14" r="3.6" fill="#da7756"/><path d="M26.2 12.2 A3.6 3.6 0 0 1 30.8 12.2 L28.5 14.6 Z" fill="var(--bg)"/></g>
-        <!-- legs -->
-        <path d="M10 22 L8 25 M14 23 L13 25.5 M20 23 L21 25.5 M24 22 L26 25" stroke="#b95f42" stroke-width="1.3" stroke-linecap="round"/>
-        <!-- shell -->
-        <path d="M7 19 A10 9 0 1 1 27 19 Z" fill="#da7756"/>
-        <!-- eyes -->
-        <g class="eye-open">
-          <circle cx="13.5" cy="13.5" r="1.5" fill="#1a1210"/>
-          <circle cx="20.5" cy="13.5" r="1.5" fill="#1a1210"/>
-        </g>
-        <g class="eye-shut" stroke="#1a1210" stroke-width="1.2" stroke-linecap="round">
-          <path d="M12.2 13.7 Q13.5 14.9 14.8 13.7"/>
-          <path d="M19.2 13.7 Q20.5 14.9 21.8 13.7"/>
-        </g>
+    <!-- Sprite geometry lifted from the CLI's own drawClawd(): body 8x7 at
+         (2,3), legs 2x2, 1x2 eyes, and the two paintbrush-wave frames. -->
+    <svg id="clawd" viewBox="0 0 16 14" shape-rendering="crispEdges" aria-hidden="true">
+      <rect x="2" y="3" width="8" height="7" fill="#d97757"/>
+      <rect x="3" y="10" width="2" height="2" fill="#d97757"/>
+      <rect x="7" y="10" width="2" height="2" fill="#d97757"/>
+      <g class="eye-open" fill="#2a1f1b">
+        <rect x="4" y="5" width="1" height="2"/><rect x="7" y="5" width="1" height="2"/>
       </g>
-      <text class="zzz" x="27" y="6">z</text><text class="zzz" x="30" y="3" style="animation-delay:1.1s">z</text>
+      <g class="eye-shut" fill="#2a1f1b">
+        <rect x="3" y="6" width="2" height="1"/><rect x="7" y="6" width="2" height="1"/>
+      </g>
+      <g class="f0"><!-- brush held level -->
+        <rect x="10" y="7" width="1" height="1" fill="#d97757"/>
+        <rect x="11" y="7" width="2" height="1" fill="#8b5e34"/>
+        <rect x="13" y="7" width="1" height="1" fill="#7d848a"/>
+        <rect x="14" y="6" width="1" height="3" fill="#d97706"/>
+        <rect x="15" y="10" width="1" height="1" fill="#d97706" opacity=".55"/>
+      </g>
+      <g class="f1"><!-- brush raised -->
+        <rect x="10" y="6" width="1" height="1" fill="#d97757"/>
+        <rect x="10" y="5" width="1" height="1" fill="#8b5e34"/>
+        <rect x="11" y="4" width="1" height="1" fill="#8b5e34"/>
+        <rect x="12" y="3" width="1" height="1" fill="#7d848a"/>
+        <rect x="13" y="2" width="1" height="1" fill="#d97706"/>
+        <rect x="14" y="1" width="2" height="1" fill="#d97706"/>
+        <rect x="14" y="0" width="1" height="1" fill="#d97706" opacity=".55"/>
+      </g>
+      <text class="zzz" x="11" y="3.6">z</text><text class="zzz" x="13" y="2" style="animation-delay:1.1s;font-size:2.8px">z</text>
     </svg>
     <span id="status">…</span>
   </span>
