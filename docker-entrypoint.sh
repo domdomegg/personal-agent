@@ -7,14 +7,17 @@
 # crash-looping. Get a shell with
 # `kubectl exec -it deploy/personal-agent-deployment -- bash` — on Adam's
 # cluster the deployment carries a -deployment suffix, and the bare name is a
-# confusing NotFound. AGENT_REPO clones the checkout below, so what is left is
+# confusing NotFound. Checkouts live under $HOME/src, mirroring the layout on
+# Adam's laptop, and deliberately not at $HOME itself: credentials such as
+# ~/.kube/config sit outside every git tree, so no `git add -A` can commit
+# them. AGENT_REPO clones the checkout below, so what is left is
 # `npm ci && npm run build`, then `claude` to log in, and it starts by itself.
 # Both live on the volume, so this is first boot only.
 set -eu
 
 HOME_DIR=/home/agent
 CREDS="$HOME_DIR/.claude/.credentials.json"
-REPO="$HOME_DIR/personal-agent"
+REPO="$HOME_DIR/src/personal-agent"
 
 if [ ! -d "$REPO/.git" ] && [ -n "${AGENT_REPO:-}" ]; then
 	echo "[entrypoint] cloning $AGENT_REPO" >&2
