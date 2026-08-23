@@ -38,7 +38,7 @@ export function streamPage(): string {
      three states — working (paintbrush wave, the sprite's own two-frame
      animation), idle (eyes shut + zzz), offline (grey). No transforms:
      sub-pixel motion blurs pixel art, so state changes swap pixels instead. */
-  #clawd { width: 42px; height: 26px; overflow: visible; }
+  #clawd { width: 31px; height: 26px; overflow: visible; }
   #clawd .eye-open, #clawd .eye-shut, #clawd .f1 { display: none; }
   #clawd .zzz { display: none; fill: var(--dim); font-size: 3.6px; }
   .st-working #clawd .eye-open { display: block; }
@@ -94,26 +94,28 @@ export function streamPage(): string {
   <h1>AGENT</h1>
   <nav><a href="/connect">connect</a></nav>
   <span class="status">
-    <!-- Clawd, traced off the official sticker art: a 16x10 squares-only
-         body with two front arms and four stub legs. The waving arm is the
-         only thing that moves — pixel art blurs under transforms, so the
-         two frames swap whole rectangles instead. -->
-    <svg id="clawd" viewBox="0 0 16 10" shape-rendering="crispEdges" aria-hidden="true">
+    <!-- Clawd, measured off the official sticker art (run-length analysis of
+         the pixel grid): 12x8 units — 8x6 body, eyes 1 in from each edge on
+         the second row, arms 2 wide either side, four 1x2 legs in two pairs
+         flush with the body edges. The sticker's front arm is part-raised to
+         hold the heart, so resting mirrors the rear arm and the wave lifts
+         high. Frames swap whole rectangles: pixel art blurs under transforms. -->
+    <svg id="clawd" viewBox="0 0 12 10" shape-rendering="crispEdges" aria-hidden="true">
       <g fill="#d97757">
-        <rect x="4" y="1" width="10" height="6"/><!-- body -->
-        <rect x="14" y="3" width="2" height="2"/><!-- rear arm -->
-        <rect x="4" y="7" width="1" height="2"/><rect x="7" y="7" width="1" height="2"/>
-        <rect x="10" y="7" width="1" height="2"/><rect x="13" y="7" width="1" height="2"/>
-        <rect class="f0" x="2" y="2" width="2" height="3"/><!-- arm, lowered -->
-        <rect class="f1" x="2" y="0" width="2" height="3"/><!-- arm, raised -->
+        <rect x="2" y="1" width="8" height="6"/><!-- body -->
+        <rect x="10" y="3" width="2" height="2"/><!-- rear arm -->
+        <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="2"/>
+        <rect x="7" y="7" width="1" height="2"/><rect x="9" y="7" width="1" height="2"/>
+        <rect class="f0" x="0" y="3" width="2" height="2"/><!-- arm, resting -->
+        <rect class="f1" x="0" y="0" width="2" height="2"/><!-- arm, raised -->
       </g>
       <g class="eye-open" fill="#2a1f1b">
-        <rect x="5" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/>
+        <rect x="3" y="2" width="1" height="1"/><rect x="8" y="2" width="1" height="1"/>
       </g>
-      <g class="eye-shut" fill="#2a1f1b"><!-- wider and lower: reads as shut, not small -->
-        <rect x="5" y="3" width="2" height="1"/><rect x="11" y="3" width="2" height="1"/>
+      <g class="eye-shut" fill="#2a1f1b">
+        <rect x="3" y="2" width="2" height="1"/><rect x="7" y="2" width="2" height="1"/>
       </g>
-      <text class="zzz" x="6.5" y="1">z</text><text class="zzz" x="8.5" y="-.4" style="animation-delay:1.1s;font-size:2.8px">z</text>
+      <text class="zzz" x="7" y="0">z</text><text class="zzz" x="9" y="-1.4" style="animation-delay:1.1s;font-size:2.8px">z</text>
     </svg>
     <span id="status">…</span>
   </span>
