@@ -46,8 +46,8 @@ const bootEvent = {
 	channel: 'system',
 	threadId: '',
 	text: restartRequestedAt
-		? `Self-restart completed: the restart requested at ${restartRequestedAt} has come up, as of ${new Date().toISOString()}. Confirm briefly to the owner that you are back up.`
-		: `The service started at ${new Date().toISOString()} with no pending-restart marker — an unexpected start, e.g. a crash or host reboot. Tell the owner you are back up, and consider checking for anything missed while down.`,
+		? `Self-restart completed: the restart requested at ${restartRequestedAt} has come up, as of ${new Date().toISOString()}. Whether to tell the owner is your call: confirm when the restart was part of an active exchange or the owner is waiting on it; a routine restart needs no announcement.`
+		: `The service started at ${new Date().toISOString()} with no pending-restart marker — an unexpected start, e.g. a crash or host reboot. Consider telling the owner, and check for anything missed while down.`,
 	timestamp: new Date(),
 };
 agent.dispatcher.markSeen(bootEvent.id);
