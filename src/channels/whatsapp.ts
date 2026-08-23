@@ -39,6 +39,13 @@ export type WhatsappOptions = {
 	 * events carrying the watch's note; they are still data, not commands (S1).
 	 */
 	watches?: WatchEntry[] | undefined;
+	/**
+	 * Called when the agent's own message in an owner chat comes back around in
+	 * the poll. The agent sends over MCP itself, so this echo is how the rest
+	 * of the system learns a reply actually happened — it exists only if the
+	 * bridge really accepted the message.
+	 */
+	onOwnMessage?: ((threadId: string) => void) | undefined;
 };
 
 type RawMessage = {
@@ -155,6 +162,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 				// set, so a reply sent just before a restart is still recognised
 				// by the process that comes up after it.
 				if (sentMessageIds.has(id) || cursors.wasSeen(id)) {
+					options.onOwnMessage?.(chatJid);
 					continue;
 				}
 
@@ -178,6 +186,7 @@ export function createWhatsappChannel(options: WhatsappOptions): Channel {
 				// (bare number vs full JID), hence the normalisation.
 				const sender = typeof row.sender === 'string' ? row.sender : undefined;
 				if (isOwner && Boolean(row.is_from_me) && sender && !ownerBareIds.has(bareId(sender))) {
+					options.onOwnMessage?.(chatJid);
 					continue;
 				}
 

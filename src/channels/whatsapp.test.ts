@@ -226,6 +226,56 @@ describe('whatsapp channel', () => {
 		expect(events[0]?.attachment).toContain(`chat_jid=${OWNER}`);
 	});
 
+	// The agent sends over MCP itself, so the poll's echo of that send is how
+	// the rest of the system learns a reply happened — it must be reported,
+	// not just skipped.
+	test('reports the agent\'s own echoed message instead of only skipping it', async () => {
+		const answered: string[] = [];
+		const call: McpCaller = async () => ({
+			result: [{
+				id: 'echo-1',
+				chat_jid: OWNER,
+				sender: '447579103778@s.whatsapp.net',
+				content: 'a direct MCP send coming back around',
+				timestamp: '2026-08-07T00:10:00+00:00',
+				is_from_me: 1,
+			}],
+		});
+
+		const channel = createWhatsappChannel({
+			call,
+			cursors: cursorStore(),
+			ownerJids: [OWNER],
+			onOwnMessage(threadId) {
+				answered.push(threadId);
+			},
+		});
+
+		expect(await channel.poll()).toHaveLength(0);
+		expect(answered).toEqual([OWNER]);
+	});
+
+	test('reports a tracked send when its id echoes back', async () => {
+		const answered: string[] = [];
+		const messages = [row('sent-1', 'a reply from the agent', '2026-08-07T00:11:00+00:00')];
+		const call: McpCaller = async (tool) => (tool === 'whatsapp__send_message'
+			? {success: true, message_id: 'sent-1', error: null}
+			: {result: messages});
+
+		const channel = createWhatsappChannel({
+			call,
+			cursors: cursorStore(),
+			ownerJids: [OWNER],
+			onOwnMessage(threadId) {
+				answered.push(threadId);
+			},
+		});
+		await channel.send({channel: 'whatsapp', threadId: OWNER, text: 'a reply from the agent'});
+
+		expect(await channel.poll()).toHaveLength(0);
+		expect(answered).toEqual([OWNER]);
+	});
+
 	test('a caption travels with its attachment', async () => {
 		const call: McpCaller = async () => ({
 			result: [{

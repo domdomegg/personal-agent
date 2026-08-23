@@ -10,7 +10,7 @@ import {Runner} from './runner.js';
 import {Dispatcher} from './dispatcher.js';
 import {Scheduler} from './scheduler.js';
 import {createMcpCaller, type McpCaller} from './mcp.js';
-import {createWhatsappChannel} from './channels/whatsapp.js';
+import {createWhatsappChannel, WHATSAPP_CHANNEL_ID} from './channels/whatsapp.js';
 import {startViewer} from './viewer/server.js';
 import {transcriptForSession} from './viewer/main.js';
 import {createEmailChannel} from './channels/email.js';
@@ -63,10 +63,7 @@ export function createAgent(options: AgentOptions): Agent {
 	// resumes it instead of failing with "Session ID is already in use".
 	const sessionMarker = `${options.statePath}.session`;
 
-	const holder: {dispatcher?: Dispatcher} = {};
-
-	/** Outbound sends not yet acknowledged by the bridge; awaited on shutdown. */
-	const inFlightSends = new Set<Promise<unknown>>();
+	const holder: {dispatcher?: Dispatcher; runner?: Runner} = {};
 
 	let viewer: {close: () => void} | undefined;
 
@@ -79,9 +76,11 @@ export function createAgent(options: AgentOptions): Agent {
 			holder.dispatcher?.markSeen(id);
 		},
 		wasSeen: (id) => holder.dispatcher?.hasSeen(id) ?? false,
+	}, (channelId, threadId) => {
+		// The agent's own send, seen coming back around in a poll: tell the
+		// runner the thread has been answered, so the reply-check stands down.
+		holder.runner?.noteReplySent(channelId, threadId);
 	});
-
-	const byId = new Map(channels.map((c) => [c.id, c]));
 
 	const runner = new Runner({
 		sessionId: config.sessionId,
@@ -101,25 +100,9 @@ export function createAgent(options: AgentOptions): Agent {
 			}
 		},
 		log,
-		async onOutbound(message) {
-			const channel = byId.get(message.channel);
-			if (!channel) {
-				log('reply for unknown channel', message.channel);
-				return;
-			}
-
-			// Tracked so shutdown can wait for it: the send is only recorded as
-			// the agent's own once the bridge returns an id, and losing that
-			// record makes the next process answer this very message.
-			const sending = channel.send(message);
-			inFlightSends.add(sending);
-			try {
-				await sending;
-			} finally {
-				inFlightSends.delete(sending);
-			}
-		},
 	});
+
+	holder.runner = runner;
 
 	const dispatcher = new Dispatcher({
 		channels,
@@ -178,22 +161,12 @@ export function createAgent(options: AgentOptions): Agent {
 			viewer = undefined;
 		},
 		/**
-		 * Settles sends that were already in flight when we stopped, so their
-		 * ids reach durable state before the process exits. Bounded, because a
-		 * hung bridge call must not block shutdown indefinitely.
+		 * Nothing to settle since the agent took over its own sends (they go
+		 * over MCP within a run, not through this process): kept because the
+		 * shutdown path calls it, and future channels may queue work again.
 		 */
-		async drain(timeoutMs = 5000): Promise<void> {
-			if (inFlightSends.size === 0) {
-				return;
-			}
-
-			log('draining sends', {count: inFlightSends.size});
-			await Promise.race([
-				Promise.allSettled([...inFlightSends]),
-				new Promise((resolve) => {
-					setTimeout(resolve, timeoutMs);
-				}),
-			]);
+		async drain(): Promise<void> {
+			// Intentionally immediate.
 		},
 	};
 }
@@ -207,7 +180,12 @@ export type CursorStore = {
 	wasSeen: (id: string) => boolean;
 };
 
-function buildChannels(config: Config, call: McpCaller, cursors: CursorStore): Channel[] {
+function buildChannels(
+	config: Config,
+	call: McpCaller,
+	cursors: CursorStore,
+	onOwnMessage?: (channelId: string, threadId: string) => void,
+): Channel[] {
 	const channels: Channel[] = [];
 
 	if (config.channels.whatsapp) {
@@ -217,6 +195,9 @@ function buildChannels(config: Config, call: McpCaller, cursors: CursorStore): C
 			ownerJids: config.channels.whatsapp.ownerJids,
 			toolPrefix: config.channels.whatsapp.toolPrefix,
 			watches: config.channels.whatsapp.watches,
+			onOwnMessage: onOwnMessage && ((threadId) => {
+				onOwnMessage(WHATSAPP_CHANNEL_ID, threadId);
+			}),
 		}));
 	}
 

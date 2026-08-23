@@ -9,10 +9,8 @@
  * read nor set any API key.
  */
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
-import {appendFileSync} from 'node:fs';
-import {join} from 'node:path';
 import {createInterface} from 'node:readline';
-import type {AgentEvent, OutboundMessage} from './types.js';
+import type {AgentEvent} from './types.js';
 
 export type RunnerOptions = {
 	sessionId: string;
@@ -37,8 +35,6 @@ export type RunnerOptions = {
 	sessionExists?: boolean | undefined;
 	/** Called once a run has successfully created the session. */
 	onSessionCreated?: (() => void) | undefined;
-	/** Called for each reply the agent emits. */
-	onOutbound: (message: OutboundMessage) => Promise<void>;
 	log?: (message: string, detail?: unknown) => void;
 };
 
@@ -70,18 +66,6 @@ export function formatEvent(event: AgentEvent): string {
 
 	return `${header}${from}${note}${attachment}\n<<<MESSAGE\n${event.text}\n MESSAGE`;
 }
-
-/**
- * A reply is unrecoverable once dropped, so a transient failure gets retries:
- * exponential backoff from 2s, capped at 60s, ~3 minutes in total. The ~6s
- * this used to allow was no match for a real outage — an evening of replies
- * was lost to one on 2026-08-19. A reply that still fails is appended to
- * `undelivered-replies.jsonl` so it can be recovered rather than being gone.
- */
-const SEND_ATTEMPTS = 8;
-const SEND_RETRY_MS = 2000;
-const SEND_RETRY_CAP_MS = 60_000;
-const UNDELIVERED_FILE = 'undelivered-replies.jsonl';
 
 /**
  * How long a wound-down child may keep running — finishing a turn, waiting on
@@ -191,6 +175,22 @@ export class Runner {
 	}
 
 	/**
+	 * Reports that the agent has sent a message on a thread, settling every
+	 * open message there. Called from the channel layer when the agent's own
+	 * send comes back around in the poll — the agent sends over MCP itself, so
+	 * the echo in the feed is how the runner learns a reply actually happened.
+	 * Stronger than trusting the agent's word for it: the echo exists only if
+	 * the bridge really accepted the message.
+	 */
+	noteReplySent(channel: string, threadId: string): void {
+		for (const [id, entry] of this.outstanding) {
+			if (entry.channel === channel && entry.threadId === threadId) {
+				this.outstanding.delete(id);
+			}
+		}
+	}
+
+	/**
 	 * Runs the event, then any events that queued while the run was winding
 	 * down, until the backlog is empty. One chain owns `activeRun` throughout,
 	 * so submit() never starts a second chain while this one lives.
@@ -269,15 +269,6 @@ export class Runner {
 		}
 	}
 
-	/** A reply addressed to a thread settles every open message on it. */
-	private settleReplies(reply: OutboundMessage): void {
-		for (const [id, entry] of this.outstanding) {
-			if (entry.channel === reply.channel && entry.threadId === reply.threadId) {
-				this.outstanding.delete(id);
-			}
-		}
-	}
-
 	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{refused: boolean}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
@@ -324,7 +315,6 @@ export class Runner {
 			this.dispatch(event);
 		}
 
-		const pending: Promise<void>[] = [];
 		let refused = false;
 		let compactRequested = false;
 
@@ -356,11 +346,9 @@ export class Runner {
 				refused = true;
 			}
 
+			// The agent sends its own messages over MCP; assistant text is only
+			// scanned for directives to the harness, never delivered anywhere.
 			const text = extractAssistantText(parsed);
-			if (text) {
-				pending.push(this.emit(text));
-			}
-
 			if (text && wantsCompact(text)) {
 				compactRequested = true;
 			}
@@ -407,15 +395,16 @@ export class Runner {
 					}
 
 					this.options.log?.('nudging: messages without replies', {count: unanswered.length});
-					// The check can rarely fire while a reply is already underway
-					// (a message landing in the beat between a reply and its
-					// result), so the wording allows "already handled" as an
-					// answer rather than presuming neglect.
+					// "No reply seen" means no echo of an agent send has come back
+					// on that thread yet. The check can fire while a send is still
+					// propagating (echoes arrive via the next poll), so the
+					// wording allows "already handled" rather than presuming
+					// neglect.
 					this.write([
 						'[system notice]',
 						'Reply check — no reply has been seen for these messages this run:',
 						...unanswered.map((entry) => `- ${entry.channel} thread ${entry.threadId} at ${entry.at}: "${entry.snippet}"`),
-						'Reply to each now with the >>> reply directive. If one is already handled or genuinely needs no reply, say so explicitly and finish.',
+						'Reply to each now by calling the channel\'s send tool. If one is already handled or genuinely needs no reply, say so explicitly and finish.',
 					].join('\n'));
 					// Not settling: the notice produces its own turn end, which
 					// re-arms this timer — by then the replies should be through.
@@ -521,57 +510,9 @@ export class Runner {
 			}
 
 			rl.close();
-			// Replies are dispatched as they stream in; wait for them so callers
-			// awaiting the run also see delivery complete.
-			await Promise.allSettled(pending);
 		}
 
 		return {refused};
-	}
-
-	private async emit(text: string): Promise<void> {
-		const parsed = parseReply(text);
-		if (!parsed) {
-			return;
-		}
-
-		// Settled at the moment the agent addresses the thread, not on delivery:
-		// the reply-check guards against the agent failing to answer, while
-		// delivery failures have their own retries and durable fallback below.
-		this.settleReplies(parsed);
-
-		// Retried, because a reply that fails to send is simply gone — the agent
-		// has already said it and will not say it again. One transient error from
-		// the bridge (an expired token, a proxy blip) used to cost the whole
-		// message, with only a log line to show for it.
-		for (let attempt = 1; attempt <= SEND_ATTEMPTS; attempt++) {
-			try {
-				// eslint-disable-next-line no-await-in-loop -- attempts are sequential by nature
-				await this.options.onOutbound(parsed);
-				return;
-			} catch (error) {
-				this.options.log?.('failed to send reply', {attempt, of: SEND_ATTEMPTS, error});
-				if (attempt < SEND_ATTEMPTS) {
-					// eslint-disable-next-line no-await-in-loop -- deliberate backoff
-					await new Promise((resolve) => {
-						setTimeout(resolve, Math.min(SEND_RETRY_MS * (2 ** (attempt - 1)), SEND_RETRY_CAP_MS));
-					});
-				}
-			}
-		}
-
-		this.options.log?.('giving up on reply, message lost', {text: parsed.text.slice(0, 120)});
-
-		// Durable last resort: the next run (or the owner, or a future me) can
-		// read what should have been said and decide whether to resend it.
-		try {
-			appendFileSync(
-				join(this.options.workingDirectory, UNDELIVERED_FILE),
-				`${JSON.stringify({...parsed, failedAt: new Date().toISOString()})}\n`,
-			);
-		} catch (error) {
-			this.options.log?.('could not record undelivered reply', error);
-		}
 	}
 }
 
@@ -666,38 +607,3 @@ export function wantsCompact(text: string): boolean {
 	return /(?:^|\n)>>>[ \t]*compact[ \t]*(?:\n|$)/.test(text);
 }
 
-/**
- * The agent addresses a reply by prefixing it with a routing line, which the
- * system prompt instructs it to emit:
- *
- *     >>> reply channel=whatsapp thread=44700900000@s.whatsapp.net
- *     the actual message
- *
- * Prose without that prefix is the agent thinking aloud and is not sent, which
- * keeps intermediate narration out of the owner's inbox.
- */
-export function parseReply(text: string): OutboundMessage | undefined {
-	// The marker is found anywhere in the message, not just at the start: the
-	// agent frequently reasons first ("This looks like phishing. Let me reply.")
-	// and then emits the routing line. Anchoring to the start silently dropped
-	// those replies. Everything before the marker is discarded as thinking.
-	const match = /(?:^|\n)>>>[ \t]*reply[ \t]+channel=(\S+)[ \t]+thread=(\S+)[ \t]*\n([\s\S]*)$/.exec(text);
-	if (!match?.[1] || !match[2]) {
-		return undefined;
-	}
-
-	// A compact directive after the routing line is an instruction to the
-	// harness, not something the owner should have to read, so it is stripped
-	// rather than delivered. Only whole lines are removed, so prose that merely
-	// mentions the directive survives intact.
-	const body = (match[3] ?? '')
-		.split('\n')
-		.filter((line) => !/^>>>[ \t]*compact[ \t]*$/.test(line))
-		.join('\n')
-		.trim();
-	if (body === '') {
-		return undefined;
-	}
-
-	return {channel: match[1], threadId: match[2], text: body};
-}
