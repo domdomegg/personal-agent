@@ -127,6 +127,7 @@ function parse(raw: string): Config {
 		timezone: typeof parsed.timezone === 'string' && parsed.timezone.trim() !== '' ? parsed.timezone : undefined,
 		model: typeof parsed.model === 'string' && parsed.model.trim() !== '' ? parsed.model : base.model,
 		fallbackModel: typeof parsed.fallbackModel === 'string' && parsed.fallbackModel.trim() !== '' ? parsed.fallbackModel : undefined,
+		mcpServer: typeof parsed.mcpServer === 'string' && parsed.mcpServer.trim() !== '' ? parsed.mcpServer : undefined,
 		polling: {...base.polling, ...parsed.polling},
 		viewer: {...base.viewer, ...parsed.viewer},
 	};

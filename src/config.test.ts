@@ -89,3 +89,16 @@ describe('system prompt fallback', () => {
 		expect(loadConfig(configPath).config.systemPrompt).toBe('custom');
 	});
 });
+
+describe('mcpServer', () => {
+	test('is passed through when set', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc', mcpServer: 'homelab'});
+		expect(loadConfig(configPath).config.mcpServer).toBe('homelab');
+	});
+
+	// Unset means call-mcp's default server, not an empty name it cannot resolve.
+	test('an empty value is treated as unset', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc', mcpServer: '  '});
+		expect(loadConfig(configPath).config.mcpServer).toBeUndefined();
+	});
+});

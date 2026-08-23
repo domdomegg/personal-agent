@@ -54,7 +54,7 @@ function noop(): void {
 export function createAgent(options: AgentOptions): Agent {
 	const {config} = options;
 	const log = options.log ?? noop;
-	const call = options.call ?? createMcpCaller({log});
+	const call = options.call ?? createMcpCaller({log, server: config.mcpServer});
 
 	// The dispatcher owns durable state, and channels read their cursors from
 	// it — but it needs the channels to construct. Indirect through a holder so

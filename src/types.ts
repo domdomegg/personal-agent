@@ -133,6 +133,15 @@ export type Config = {
 	/** Retried on once if `model` declines to answer at all. Omit to disable. */
 	fallbackModel?: string | undefined;
 
+	/**
+	 * call-mcp server name for every tool call (polling, sending, media). Omit
+	 * for `Aggregator`, the owner's claude.ai connector, which call-mcp resolves
+	 * through claude.ai on every call (~1.9s each, and down whenever that lookup
+	 * is). A config-file server such as `homelab` talks to the gateway directly
+	 * on its own credential (~0.6s, 2026-08-23).
+	 */
+	mcpServer?: string | undefined;
+
 	/** Directory Claude Code runs in — the agent's own repo, so it can edit itself (M1, M2). */
 	workingDirectory: string;
 

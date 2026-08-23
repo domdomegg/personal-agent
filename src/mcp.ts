@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 export type McpCaller = (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 
 export type McpOptions = {
-	server?: string;
+	server?: string | undefined;
 	binary?: string;
 	/** Generous: some connectors are slow, and a stuck poll is better than a wrong one. */
 	timeoutMs?: number;
