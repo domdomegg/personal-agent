@@ -317,6 +317,7 @@ export class Runner {
 
 		let refused = false;
 		let compactRequested = false;
+		let justCompacted = false;
 
 		// Claude Code keeps running while stdin is open — that is what allows an
 		// event to join a run in progress (F3). So a turn is finished when a
@@ -418,6 +419,7 @@ export class Runner {
 				// compact at a chosen moment, not merely to compact.
 				if (compactRequested) {
 					compactRequested = false;
+					justCompacted = true;
 					this.options.log?.('compacting on request');
 					// Sent raw, not through write(), so it reaches Claude Code as a
 					// slash command. Everything else goes through formatEvent's
@@ -425,6 +427,23 @@ export class Runner {
 					this.write('/compact');
 					// Not settling: the compaction produces its own turn end, which
 					// re-arms this timer with the flag now clear.
+					return;
+				}
+
+				// A requested compaction lands between turns, and the continuation
+				// prompt Claude Code then issues is wrapped in a "do not respond"
+				// local-command caveat. Seen once (2026-08-23): the agent obeyed the
+				// caveat, answered nothing, and the run wound down with its planned
+				// work dropped. So after the compact settles, prompt the resume
+				// explicitly through the normal channel.
+				if (justCompacted) {
+					justCompacted = false;
+					this.options.log?.('post-compact resume notice');
+					this.write([
+						'[system notice]',
+						'Context compaction (your >>> compact) is done. If any planned or in-progress work remains, pick it up now. If you already resumed, or nothing is pending, say so explicitly and finish.',
+					].join('\n'));
+					// Not settling: the notice's own turn end re-arms this timer.
 					return;
 				}
 
