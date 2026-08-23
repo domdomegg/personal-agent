@@ -39,10 +39,11 @@ export function streamPage(): string {
      animation), idle (eyes shut + zzz), offline (grey). No transforms:
      sub-pixel motion blurs pixel art, so state changes swap pixels instead. */
   #clawd { width: 31px; height: 26px; overflow: visible; }
-  #clawd .eye-open, #clawd .eye-shut, #clawd .f1 { display: none; }
+  #clawd .eye-open, #clawd .eye-shut, #clawd .f0, #clawd .f1 { display: none; }
   #clawd .zzz { display: none; fill: var(--dim); font-size: 3.6px; }
   .st-working #clawd .eye-open { display: block; }
-  .st-working #clawd .f0 { animation: wave0 .84s linear infinite; }
+  .st-working #clawd .legs { display: none; }
+  .st-working #clawd .f0 { display: block; animation: wave0 .84s linear infinite; }
   .st-working #clawd .f1 { display: block; animation: wave1 .84s linear infinite; }
   .st-idle #clawd .eye-shut { display: block; }
   .st-idle #clawd .zzz { display: block; animation: floatz 3.4s ease-in-out infinite; }
@@ -103,17 +104,28 @@ export function streamPage(): string {
     <svg id="clawd" viewBox="0 0 12 10" shape-rendering="crispEdges" aria-hidden="true">
       <g fill="#d97757">
         <rect x="2" y="1" width="8" height="6"/><!-- body -->
+        <rect x="0" y="3" width="2" height="2"/><!-- front arm -->
         <rect x="10" y="3" width="2" height="2"/><!-- rear arm -->
-        <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="2"/>
-        <rect x="7" y="7" width="1" height="2"/><rect x="9" y="7" width="1" height="2"/>
-        <rect class="f0" x="0" y="3" width="2" height="2"/><!-- arm, resting -->
-        <rect class="f1" x="0" y="0" width="2" height="2"/><!-- arm, raised -->
+        <!-- Working = a little scuttle: diagonal leg pairs lift alternately.
+             Idle and offline show all four legs planted. -->
+        <g class="legs">
+          <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="2"/>
+          <rect x="7" y="7" width="1" height="2"/><rect x="9" y="7" width="1" height="2"/>
+        </g>
+        <g class="f0">
+          <rect x="2" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="2"/>
+          <rect x="7" y="7" width="1" height="2"/><rect x="9" y="7" width="1" height="1"/>
+        </g>
+        <g class="f1">
+          <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="1"/>
+          <rect x="7" y="7" width="1" height="1"/><rect x="9" y="7" width="1" height="2"/>
+        </g>
       </g>
       <g class="eye-open" fill="#2a1f1b">
         <rect x="3" y="2" width="1" height="1"/><rect x="8" y="2" width="1" height="1"/>
       </g>
-      <g class="eye-shut" fill="#2a1f1b">
-        <rect x="3" y="2" width="2" height="1"/><rect x="7" y="2" width="2" height="1"/>
+      <g class="eye-shut" fill="#2a1f1b"><!-- thin lids, low in the socket -->
+        <rect x="3" y="2.5" width="2" height=".5"/><rect x="7" y="2.5" width="2" height=".5"/>
       </g>
       <text class="zzz" x="7" y="0">z</text><text class="zzz" x="9" y="-1.4" style="animation-delay:1.1s;font-size:2.8px">z</text>
     </svg>

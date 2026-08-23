@@ -9,9 +9,19 @@ FROM node:22-bookworm-slim
 # git: the agent commits and pushes its own repo.
 # ripgrep/jq/less/procps: what Claude Code reaches for constantly.
 # bash: `kubectl exec -it ... -- bash` is how you get a shell in here.
+# fontconfig/unzip: chart rendering (sharp/librsvg needs fontconfig to find
+# fonts); reinstalling them from a shell was lost on every pod restart.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	bash ca-certificates curl git gnupg jq less procps ripgrep \
+	bash ca-certificates curl fontconfig git gnupg jq less procps ripgrep unzip \
 	&& rm -rf /var/lib/apt/lists/*
+
+# Source Sans 3, the house font for charts the agent sends.
+RUN curl -fsSLo /tmp/ss3.zip https://github.com/adobe-fonts/source-sans/releases/download/3.052R/OTF-source-sans-3.052R.zip \
+	&& unzip -q /tmp/ss3.zip -d /tmp/ss3 \
+	&& mkdir -p /usr/local/share/fonts \
+	&& cp /tmp/ss3/OTF/*.otf /usr/local/share/fonts/ \
+	&& fc-cache -f \
+	&& rm -rf /tmp/ss3 /tmp/ss3.zip
 
 # GitHub CLI, for the agent's own PRs.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
