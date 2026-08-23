@@ -38,11 +38,11 @@ export function streamPage(): string {
      three states — working (paintbrush wave, the sprite's own two-frame
      animation), idle (eyes shut + zzz), offline (grey). No transforms:
      sub-pixel motion blurs pixel art, so state changes swap pixels instead. */
-  #clawd { width: 30px; height: 26px; overflow: visible; }
-  #clawd .eye-open, #clawd .eye-shut, #clawd .f0, #clawd .f1 { display: none; }
+  #clawd { width: 42px; height: 26px; overflow: visible; }
+  #clawd .eye-open, #clawd .eye-shut, #clawd .f1 { display: none; }
   #clawd .zzz { display: none; fill: var(--dim); font-size: 3.6px; }
   .st-working #clawd .eye-open { display: block; }
-  .st-working #clawd .f0 { display: block; animation: wave0 .84s linear infinite; }
+  .st-working #clawd .f0 { animation: wave0 .84s linear infinite; }
   .st-working #clawd .f1 { display: block; animation: wave1 .84s linear infinite; }
   .st-idle #clawd .eye-shut { display: block; }
   .st-idle #clawd .zzz { display: block; animation: floatz 3.4s ease-in-out infinite; }
@@ -94,35 +94,26 @@ export function streamPage(): string {
   <h1>AGENT</h1>
   <nav><a href="/connect">connect</a></nav>
   <span class="status">
-    <!-- Sprite geometry lifted from the CLI's own drawClawd(): body 8x7 at
-         (2,3), legs 2x2, 1x2 eyes, and the two paintbrush-wave frames. -->
-    <svg id="clawd" viewBox="0 0 16 14" shape-rendering="crispEdges" aria-hidden="true">
-      <rect x="2" y="3" width="8" height="7" fill="#d97757"/>
-      <rect x="3" y="10" width="2" height="2" fill="#d97757"/>
-      <rect x="7" y="10" width="2" height="2" fill="#d97757"/>
+    <!-- Clawd, traced off the official sticker art: a 16x10 squares-only
+         body with two front arms and four stub legs. The waving arm is the
+         only thing that moves — pixel art blurs under transforms, so the
+         two frames swap whole rectangles instead. -->
+    <svg id="clawd" viewBox="0 0 16 10" shape-rendering="crispEdges" aria-hidden="true">
+      <g fill="#d97757">
+        <rect x="4" y="1" width="10" height="6"/><!-- body -->
+        <rect x="14" y="3" width="2" height="2"/><!-- rear arm -->
+        <rect x="4" y="7" width="1" height="2"/><rect x="7" y="7" width="1" height="2"/>
+        <rect x="10" y="7" width="1" height="2"/><rect x="13" y="7" width="1" height="2"/>
+        <rect class="f0" x="2" y="2" width="2" height="3"/><!-- arm, lowered -->
+        <rect class="f1" x="2" y="0" width="2" height="3"/><!-- arm, raised -->
+      </g>
       <g class="eye-open" fill="#2a1f1b">
-        <rect x="4" y="5" width="1" height="2"/><rect x="7" y="5" width="1" height="2"/>
+        <rect x="5" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/>
       </g>
-      <g class="eye-shut" fill="#2a1f1b">
-        <rect x="3" y="6" width="2" height="1"/><rect x="7" y="6" width="2" height="1"/>
+      <g class="eye-shut" fill="#2a1f1b"><!-- wider and lower: reads as shut, not small -->
+        <rect x="5" y="3" width="2" height="1"/><rect x="11" y="3" width="2" height="1"/>
       </g>
-      <g class="f0"><!-- brush held level -->
-        <rect x="10" y="7" width="1" height="1" fill="#d97757"/>
-        <rect x="11" y="7" width="2" height="1" fill="#8b5e34"/>
-        <rect x="13" y="7" width="1" height="1" fill="#7d848a"/>
-        <rect x="14" y="6" width="1" height="3" fill="#d97706"/>
-        <rect x="15" y="10" width="1" height="1" fill="#d97706" opacity=".55"/>
-      </g>
-      <g class="f1"><!-- brush raised -->
-        <rect x="10" y="6" width="1" height="1" fill="#d97757"/>
-        <rect x="10" y="5" width="1" height="1" fill="#8b5e34"/>
-        <rect x="11" y="4" width="1" height="1" fill="#8b5e34"/>
-        <rect x="12" y="3" width="1" height="1" fill="#7d848a"/>
-        <rect x="13" y="2" width="1" height="1" fill="#d97706"/>
-        <rect x="14" y="1" width="2" height="1" fill="#d97706"/>
-        <rect x="14" y="0" width="1" height="1" fill="#d97706" opacity=".55"/>
-      </g>
-      <text class="zzz" x="11" y="3.6">z</text><text class="zzz" x="13" y="2" style="animation-delay:1.1s;font-size:2.8px">z</text>
+      <text class="zzz" x="6.5" y="1">z</text><text class="zzz" x="8.5" y="-.4" style="animation-delay:1.1s;font-size:2.8px">z</text>
     </svg>
     <span id="status">…</span>
   </span>
