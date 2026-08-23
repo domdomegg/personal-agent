@@ -39,6 +39,16 @@ describe('createMcpCaller', () => {
 		await expect(call('whatsapp__send_message', {})).rejects.toThrow(/connector is down/);
 	});
 
+	// The aggregator reports an unreachable upstream as a bare string result
+	// with exit code 0; a poll must not mistake that for an empty feed.
+	test('throws on an aggregator "Error calling" string result', async () => {
+		const call = createMcpCaller({
+			binary: stubBinary('"Error calling whatsapp-claube: Streamable HTTP error: 500"'),
+		});
+
+		await expect(call('whatsapp__list_messages', {})).rejects.toThrow(/Error calling whatsapp-claube/);
+	});
+
 	test('parses an ordinary response', async () => {
 		const call = createMcpCaller({binary: stubBinary('{"result":[1,2,3]}')});
 		await expect(call('whatsapp__list_messages', {})).resolves.toEqual({result: [1, 2, 3]});

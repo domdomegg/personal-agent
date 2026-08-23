@@ -110,6 +110,16 @@ export function createMcpCaller(options: McpOptions = {}): McpCaller {
 			}
 		}
 
+		// When the aggregator cannot reach an upstream it returns a tool result
+		// whose only content is the text "Error calling <upstream>: ..." — exit
+		// code 0, valid JSON, a plain string. Left alone, a poll would read it
+		// as "no messages" and the outage would be invisible (2026-08-23: the
+		// whatsapp upstream answered 500 for ~2 min every hour while its token
+		// expired, and nothing logged it).
+		if (typeof parsed === 'string' && parsed.startsWith('Error calling ')) {
+			throw new Error(`${tool} failed: ${parsed.slice(0, 500)}`);
+		}
+
 		return parsed;
 	};
 
