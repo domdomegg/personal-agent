@@ -2,6 +2,7 @@
 /**
  * Entrypoint. Loads config, starts the agent, and stays up.
  */
+import {existsSync, readFileSync, rmSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {loadConfig} from './config.js';
 import {createAgent} from './index.js';
@@ -25,6 +26,34 @@ if (warning) {
 
 const agent = createAgent({config, statePath, log});
 agent.start();
+
+// Every boot wakes the agent with the facts of its own start. A marker left
+// by scripts/restart.sh means a deliberate self-restart, whose completion the
+// owner should hear about — two restarts failed silently on 2026-08-20/21 and
+// the owner had to ask whether anything was running. No marker means a crash
+// or host reboot, worth flagging even more. What to tell the owner is the
+// agent's call; this only delivers the facts.
+const restartMarker = resolve('.restart-pending');
+const restartRequestedAt = existsSync(restartMarker)
+	? readFileSync(restartMarker, 'utf8').trim()
+	: undefined;
+if (restartRequestedAt !== undefined) {
+	rmSync(restartMarker, {force: true});
+}
+
+const bootEvent = {
+	id: `boot-${Date.now()}`,
+	channel: 'system',
+	threadId: '',
+	text: restartRequestedAt
+		? `Self-restart completed: the restart requested at ${restartRequestedAt} has come up, as of ${new Date().toISOString()}. Confirm briefly to the owner that you are back up.`
+		: `The service started at ${new Date().toISOString()} with no pending-restart marker — an unexpected start, e.g. a crash or host reboot. Tell the owner you are back up, and consider checking for anything missed while down.`,
+	timestamp: new Date(),
+};
+agent.dispatcher.markSeen(bootEvent.id);
+void agent.runner.submit(bootEvent).catch((error: unknown) => {
+	log('boot notice run failed', error);
+});
 
 // If we fell back to a previous config (M4), tell the owner rather than
 // silently running something they did not intend.

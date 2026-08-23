@@ -30,6 +30,11 @@ fi
 # agent alone rather than take it down with nothing to come back to.
 npm run build >/dev/null
 
+# Left for the next process: on boot it announces the completed restart to the
+# agent, which confirms to the owner. If this marker is ever found stale, the
+# restart it describes never came up.
+date -u +%Y-%m-%dT%H:%M:%SZ > .restart-pending
+
 # Double fork: the outer shell exits at once, so the inner one is reparented to
 # init and survives the agent's death. Killing the agent's process group cannot
 # reach it.
