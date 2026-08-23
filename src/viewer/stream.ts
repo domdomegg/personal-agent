@@ -17,6 +17,7 @@ export function streamPage(): string {
     color-scheme: dark;
     --bg: #0b0c0e; --line: #1e2126; --text: #d6d9de; --dim: #767c86;
     --tool: #7aa2f7; --reply: #9ece6a; --in: #e0af68; --err: #f7768e;
+    --add: #1d2b1d; --add-text: #b2dfae; --del: #2e1a1e; --del-text: #e8a7b0;
   }
   * { box-sizing: border-box; }
   body {
@@ -26,14 +27,33 @@ export function streamPage(): string {
   header {
     position: sticky; top: 0; z-index: 2; background: rgba(11,12,14,.94);
     backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
-    padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; display: flex; align-items: center; gap: 12px;
   }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .04em; }
-  nav a { color: var(--dim); text-decoration: none; }
-  nav a.on { color: var(--tool); }
-  .live { margin-left: auto; color: var(--dim); display: flex; align-items: center; gap: 6px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #5ac467; }
-  .dot.idle { background: var(--dim); }
+  nav a { color: var(--dim); text-decoration: none; margin-right: 10px; }
+  nav a:hover { color: var(--text); }
+  .status { margin-left: auto; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+
+  /* Clawd: three states — working (typing), idle (asleep), offline (grey). */
+  #clawd { width: 34px; height: 26px; overflow: visible; }
+  #clawd .body { transform-origin: 17px 18px; }
+  #clawd .claw { transform-origin: center; }
+  #clawd .eye-open { display: none; } #clawd .eye-shut { display: none; }
+  #clawd .zzz { display: none; fill: var(--dim); font-size: 7px; }
+  .st-working #clawd .eye-open { display: block; }
+  .st-working #clawd .claw.l { animation: tap .5s ease-in-out infinite; }
+  .st-working #clawd .claw.r { animation: tap .5s ease-in-out .25s infinite; }
+  .st-working #clawd .body { animation: bob 1.2s ease-in-out infinite; }
+  .st-idle #clawd .eye-shut { display: block; }
+  .st-idle #clawd .body { animation: breathe 3.4s ease-in-out infinite; }
+  .st-idle #clawd .zzz { display: block; animation: floatz 3.4s ease-in-out infinite; }
+  .st-offline #clawd { filter: grayscale(1); opacity: .45; }
+  .st-offline #clawd .eye-shut { display: block; }
+  @keyframes tap { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2.2px); } }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-.8px); } }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+  @keyframes floatz { 0% { opacity: 0; transform: translateY(2px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px); } }
+
   /* Jump-to-latest: only shown when scrolled away from the bottom. */
   #jump {
     position: fixed; right: 16px; bottom: 20px; z-index: 3;
@@ -65,23 +85,52 @@ export function streamPage(): string {
     border-left: 2px solid var(--line); overflow-x: auto; max-height: 340px;
     color: #aeb4bd; white-space: pre-wrap;
   }
+  .diff { margin: 6px 0 2px; border-left: 2px solid var(--line); max-height: 340px; overflow: auto; }
+  .diff .file { color: var(--dim); padding: 4px 10px; background: #101318; }
+  .diff .ln { padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diff .del { background: var(--del); color: var(--del-text); }
+  .diff .add { background: var(--add); color: var(--add-text); }
   .empty { color: var(--dim); text-align: center; padding: 48px 0; }
 </style>
 <header>
   <h1>AGENT</h1>
-  <span class="live"><span class="dot" id="dot"></span><span id="status">live</span></span>
+  <nav><a href="/connect">connect</a></nav>
+  <span class="status">
+    <svg id="clawd" viewBox="0 0 34 26" aria-hidden="true">
+      <g class="body">
+        <!-- claws -->
+        <g class="claw l"><circle cx="5.5" cy="14" r="3.6" fill="#da7756"/><path d="M3.2 12.2 A3.6 3.6 0 0 1 7.8 12.2 L5.5 14.6 Z" fill="var(--bg)"/></g>
+        <g class="claw r"><circle cx="28.5" cy="14" r="3.6" fill="#da7756"/><path d="M26.2 12.2 A3.6 3.6 0 0 1 30.8 12.2 L28.5 14.6 Z" fill="var(--bg)"/></g>
+        <!-- legs -->
+        <path d="M10 22 L8 25 M14 23 L13 25.5 M20 23 L21 25.5 M24 22 L26 25" stroke="#b95f42" stroke-width="1.3" stroke-linecap="round"/>
+        <!-- shell -->
+        <path d="M7 19 A10 9 0 1 1 27 19 Z" fill="#da7756"/>
+        <!-- eyes -->
+        <g class="eye-open">
+          <circle cx="13.5" cy="13.5" r="1.5" fill="#1a1210"/>
+          <circle cx="20.5" cy="13.5" r="1.5" fill="#1a1210"/>
+        </g>
+        <g class="eye-shut" stroke="#1a1210" stroke-width="1.2" stroke-linecap="round">
+          <path d="M12.2 13.7 Q13.5 14.9 14.8 13.7"/>
+          <path d="M19.2 13.7 Q20.5 14.9 21.8 13.7"/>
+        </g>
+      </g>
+      <text class="zzz" x="27" y="6">z</text><text class="zzz" x="30" y="3" style="animation-delay:1.1s">z</text>
+    </svg>
+    <span id="status">…</span>
+  </span>
 </header>
 <main id="root"><div class="empty">loading…</div></main>
 <button id="jump">↓ latest<span class="n" id="jumpCount"></span></button>
 <script>
 const root = document.getElementById('root');
 const statusEl = document.getElementById('status');
-const dot = document.getElementById('dot');
 const jump = document.getElementById('jump');
 const jumpCount = document.getElementById('jumpCount');
 const opened = new Set();
 let latest = [];
 let seen = -1;
+let changedAt = 0;
 // Rows that arrived while scrolled away, so the button can say how many.
 let unseenRows = 0;
 
@@ -109,12 +158,44 @@ const time = (iso) => {
   return new Date(iso).toLocaleTimeString([], {hour12: false});
 };
 
+// A details element that survives the once-a-second re-render.
+function keepOpen(d, key) {
+  d.open = opened.has(key);
+  d.addEventListener('toggle', () => {
+    if (d.open) opened.add(key); else opened.delete(key);
+  });
+}
+
+function diffBlock(detail) {
+  const wrap = document.createElement('div');
+  wrap.className = 'diff';
+  const file = document.createElement('div');
+  file.className = 'file';
+  file.textContent = detail.filePath + (detail.replaceAll ? '  (replace all)' : '');
+  wrap.append(file);
+  const side = (text, cls, sign) => {
+    for (const line of text.split('\\n')) {
+      const el = document.createElement('div');
+      el.className = 'ln ' + cls;
+      el.textContent = sign + ' ' + line;
+      wrap.append(el);
+    }
+  };
+  if (detail.type === 'edit') {
+    side(detail.oldString, 'del', '-');
+    side(detail.newString, 'add', '+');
+  } else {
+    side(detail.content, 'add', '+');
+  }
+  return wrap;
+}
+
 function render(entries) {
   latest = entries;
   if (!entries.length) { root.innerHTML = '<div class="empty">nothing yet</div>'; return; }
   const frag = document.createDocumentFragment();
 
-  for (const e of entries) {
+  entries.forEach((e, i) => {
     const row = document.createElement('div');
     row.className = 'row ' + e.kind + (e.failed ? ' failed' : '') + (e.queued ? ' queued' : '');
 
@@ -127,11 +208,14 @@ function render(entries) {
     // Queued messages arrived mid-turn; worth distinguishing at a glance.
     tag.textContent = e.kind === 'incoming'
       ? (e.queued ? 'adam+' : 'adam')
+      : e.kind === 'reply' ? (e.failed ? 'undeliv' : 'reply')
       : e.kind === 'tool' ? (e.failed ? 'error' : 'tool') : e.kind;
     if (e.queued) tag.title = 'sent while a turn was already running';
+    if (e.kind === 'reply' && e.failed) tag.title = 'send failed — Adam did not get this';
 
     const body = document.createElement('span');
     body.className = 'body';
+    const key = i + '/' + e.at + '/' + (e.name || e.kind);
 
     if (e.kind === 'tool') {
       const head = document.createElement('div');
@@ -139,6 +223,23 @@ function render(entries) {
       name.textContent = e.name;
       head.append(name, ' ' + (e.input || ''));
       body.append(head);
+      if (e.detail) {
+        const d = document.createElement('details');
+        const s = document.createElement('summary');
+        s.textContent = e.detail.type === 'edit' ? '▸ diff'
+          : e.detail.type === 'write' ? '▸ content (' + e.detail.content.split('\\n').length + ' lines)'
+          : '▸ input';
+        d.append(s);
+        if (e.detail.type === 'json') {
+          const pre = document.createElement('pre');
+          pre.textContent = e.detail.json;
+          d.append(pre);
+        } else {
+          d.append(diffBlock(e.detail));
+        }
+        keepOpen(d, key + '/in');
+        body.append(d);
+      }
       if (e.result) {
         const d = document.createElement('details');
         const lines = e.result.split('\\n').length;
@@ -146,12 +247,7 @@ function render(entries) {
         const pre = document.createElement('pre');
         pre.textContent = e.result;
         d.append(pre);
-        // Keep it open across the once-a-second re-render.
-        const key = e.at + '/' + e.name;
-        d.open = opened.has(key);
-        d.addEventListener('toggle', () => {
-          if (d.open) opened.add(key); else opened.delete(key);
-        });
+        keepOpen(d, key + '/out');
         body.append(d);
       } else {
         // No result yet: this is the call currently in flight.
@@ -161,15 +257,41 @@ function render(entries) {
         wait.textContent = '· running';
         body.append(wait);
       }
+    } else if (e.kind === 'reply') {
+      body.textContent = e.text;
+      if (!e.result) {
+        row.classList.add('running');
+      } else if (e.failed) {
+        const d = document.createElement('details');
+        d.innerHTML = '<summary>▸ send error</summary>';
+        const pre = document.createElement('pre');
+        pre.textContent = e.result;
+        d.append(pre);
+        keepOpen(d, key + '/err');
+        body.append(d);
+      }
     } else {
       body.textContent = e.text;
     }
 
     row.append(t, tag, body);
     frag.append(row);
-  }
+  });
 
   root.replaceChildren(frag);
+}
+
+function setState(state) {
+  document.body.className = 'st-' + state;
+  statusEl.textContent = state;
+}
+
+function computeState() {
+  const last = latest[latest.length - 1];
+  const unresolved = last && (last.kind === 'tool' || last.kind === 'reply') && !last.result;
+  // Working = a call is in flight, or the transcript moved in the last 15s.
+  if (unresolved || Date.now() - changedAt < 15000) return 'working';
+  return 'idle';
 }
 
 async function refresh() {
@@ -191,13 +313,12 @@ async function refresh() {
 async function poll() {
   try {
     const r = await fetch('/api/version');
-    const {version} = await r.json();
-    if (version !== seen) await refresh();
-    dot.className = 'dot';
-    statusEl.textContent = 'live';
+    const data = await r.json();
+    if (data.changedAt) changedAt = data.changedAt;
+    if (data.version !== seen) await refresh();
+    setState(computeState());
   } catch {
-    dot.className = 'dot idle';
-    statusEl.textContent = 'offline';
+    setState('offline');
   }
   setTimeout(poll, 1000);
 }

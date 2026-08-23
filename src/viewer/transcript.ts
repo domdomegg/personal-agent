@@ -9,10 +9,25 @@
 import {createReadStream} from 'node:fs';
 import {createInterface} from 'node:readline';
 
+/**
+ * Structured detail for tool calls the viewer renders specially. `json` is the
+ * fallback: the complete input, pretty-printed, for every other tool.
+ */
+export type ToolDetail =
+	| {type: 'edit'; filePath: string; oldString: string; newString: string; replaceAll?: boolean}
+	| {type: 'write'; filePath: string; content: string}
+	| {type: 'json'; json: string};
+
 export type Entry =
 	/** `queued` marks a message that arrived while a turn was already running. */
 	| {kind: 'incoming'; at: string; text: string; queued?: boolean}
-	| {kind: 'reply'; at: string; text: string}
+	/**
+	 * A delivered outgoing message. Modern transcripts: a send_message tool
+	 * call, recognised by its command and upgraded to a reply row (failed =
+	 * the send errored, i.e. Adam did NOT get it). Older transcripts: the
+	 * `>>> reply` marker in assistant prose.
+	 */
+	| {kind: 'reply'; at: string; text: string; result?: string; failed?: boolean}
 	/**
 	 * Assistant prose that was NOT delivered — deliberately not called
 	 * "thinking": these are ordinary `text` blocks, not the API's `thinking`
@@ -21,7 +36,7 @@ export type Entry =
 	 * is working-out that Adam never saw.
 	 */
 	| {kind: 'notes'; at: string; text: string}
-	| {kind: 'tool'; at: string; name: string; input: string; result?: string; failed?: boolean};
+	| {kind: 'tool'; at: string; name: string; input: string; detail?: ToolDetail; result?: string; failed?: boolean};
 
 /**
  * The runner delivers a line of exactly this form plus the text following it.
@@ -54,8 +69,10 @@ type Raw = {
 export async function readTranscript(path: string): Promise<Entry[]> {
 	const entries: Entry[] = [];
 	// Tool results arrive in a later user message than the call, so calls are
-	// indexed by id and back-filled when the result shows up.
-	const toolsById = new Map<string, Entry & {kind: 'tool'}>();
+	// indexed by id and back-filled when the result shows up. Sends are indexed
+	// too: a send_message call renders as a reply row, and its result decides
+	// whether the message actually reached Adam.
+	const toolsById = new Map<string, Entry & {kind: 'tool' | 'reply'}>();
 
 	const rl = createInterface({input: createReadStream(path), crlfDelay: Infinity});
 
@@ -106,7 +123,11 @@ export async function readTranscript(path: string): Promise<Entry[]> {
 					: undefined;
 				if (call) {
 					call.result = flatten(block.content).slice(0, 4000);
-					call.failed = block.is_error === true;
+					// For a reply row, "failed" means undelivered: the send tool
+					// reports {"success":true,...} on stdout only when it went through.
+					call.failed = call.kind === 'reply'
+						? block.is_error === true || !call.result.includes('"success":true')
+						: block.is_error === true;
 				}
 			}
 
@@ -123,12 +144,17 @@ export async function readTranscript(path: string): Promise<Entry[]> {
 			}
 
 			if (block.type === 'tool_use' && typeof block.id === 'string') {
-				const entry: Entry & {kind: 'tool'} = {
-					kind: 'tool',
-					at,
-					name: typeof block.name === 'string' ? block.name : 'tool',
-					input: describeInput(block.input),
-				};
+				const name = typeof block.name === 'string' ? block.name : 'tool';
+				const sent = name === 'Bash' ? extractSend(block.input) : undefined;
+				const entry: Entry & {kind: 'tool' | 'reply'} = sent
+					? {kind: 'reply', at, text: sent}
+					: {
+						kind: 'tool',
+						at,
+						name,
+						input: describeInput(block.input),
+						...describeDetail(name, block.input),
+					};
 				toolsById.set(block.id, entry);
 				entries.push(entry);
 			}
@@ -176,6 +202,72 @@ type Block = {
 
 function asBlocks(content: unknown): Block[] {
 	return Array.isArray(content) ? (content as Block[]) : [];
+}
+
+/**
+ * The agent sends WhatsApp messages itself, as call-mcp Bash commands. Spotting
+ * those turns an opaque Bash row back into a readable reply row — the viewer's
+ * conversation view depends on it since the old `>>> reply` parser was removed.
+ */
+export function extractSend(input: unknown): string | undefined {
+	if (input === null || typeof input !== 'object') {
+		return undefined;
+	}
+
+	const {command} = (input as Record<string, unknown>);
+	if (typeof command !== 'string' || !command.includes('send_message')) {
+		return undefined;
+	}
+
+	// The command may chain other things; only the --args payload matters.
+	const args = /--args\s+'(\{[\s\S]*?\})'/.exec(command);
+	if (!args?.[1]) {
+		return undefined;
+	}
+
+	try {
+		const parsed = JSON.parse(args[1]) as {message?: unknown};
+		return typeof parsed.message === 'string' ? parsed.message : undefined;
+	} catch {
+		// Unparseable payload (e.g. awkward shell quoting): leave it a tool row.
+		return undefined;
+	}
+}
+
+/** Structured detail for tools with a dedicated rendering; full JSON otherwise. */
+function describeDetail(name: string, input: unknown): {detail?: ToolDetail} {
+	if (input === null || typeof input !== 'object') {
+		return {};
+	}
+
+	const record = input as Record<string, unknown>;
+
+	if (name === 'Edit'
+		&& typeof record.file_path === 'string'
+		&& typeof record.old_string === 'string'
+		&& typeof record.new_string === 'string') {
+		return {
+			detail: {
+				type: 'edit',
+				filePath: record.file_path,
+				oldString: record.old_string,
+				newString: record.new_string,
+				...(record.replace_all === true ? {replaceAll: true} : {}),
+			},
+		};
+	}
+
+	if (name === 'Write' && typeof record.file_path === 'string' && typeof record.content === 'string') {
+		return {detail: {type: 'write', filePath: record.file_path, content: record.content}};
+	}
+
+	const json = JSON.stringify(record, undefined, 2);
+	// A one-field input whose value already IS the summary line adds nothing.
+	if (json === '{}' || Object.keys(record).length === 0) {
+		return {};
+	}
+
+	return {detail: {type: 'json', json: json.slice(0, 20_000)}};
 }
 
 /** The one field worth showing for the common tools; JSON for the rest. */

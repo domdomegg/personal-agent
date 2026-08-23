@@ -13,8 +13,10 @@ import {
 	watch, existsSync, mkdirSync, type FSWatcher,
 } from 'node:fs';
 import {dirname, basename} from 'node:path';
+import {hostname} from 'node:os';
 import {readTranscript, type Entry} from './transcript.js';
 import {streamPage} from './stream.js';
+import {connectPage} from './connect.js';
 
 export type ViewerOptions = {
 	transcriptPath: string;
@@ -23,7 +25,10 @@ export type ViewerOptions = {
 
 export function startViewer(options: ViewerOptions): {close: () => void} {
 	// Bumped on every file change; clients poll it to know when to refetch.
+	// changedAt feeds the working/idle indicator: fresh writes mean a turn is
+	// in progress even when no tool call is visibly unresolved.
 	let version = 0;
+	let changedAt = 0;
 
 	// Claude Code writes the transcript on the session's first turn, so on a
 	// fresh session there is no file — and often no projects/ directory — when
@@ -39,6 +44,7 @@ export function startViewer(options: ViewerOptions): {close: () => void} {
 	const watchFile = (): void => {
 		fileWatcher = watch(options.transcriptPath, () => {
 			version += 1;
+			changedAt = Date.now();
 		});
 	};
 
@@ -71,7 +77,7 @@ export function startViewer(options: ViewerOptions): {close: () => void} {
 		};
 
 		if (url.pathname === '/api/version') {
-			send(200, 'application/json', JSON.stringify({version}));
+			send(200, 'application/json', JSON.stringify({version, changedAt}));
 			return;
 		}
 
@@ -96,6 +102,17 @@ export function startViewer(options: ViewerOptions): {close: () => void} {
 		// /stream kept as an alias so existing tabs and bookmarks still work.
 		if (url.pathname === '/' || url.pathname === '/stream') {
 			send(200, 'text/html; charset=utf-8', streamPage());
+			return;
+		}
+
+		if (url.pathname === '/connect') {
+			// The pod name is the hostname, so the page stays correct across
+			// rollouts without any config.
+			send(200, 'text/html; charset=utf-8', connectPage({
+				podName: hostname(),
+				namespace: 'default',
+				container: 'personal-agent',
+			}));
 			return;
 		}
 
