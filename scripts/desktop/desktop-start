@@ -1,0 +1,42 @@
+#!/bin/sh
+# Bring up the agent's desktop: a virtual X display, a window manager, and a
+# VNC server reachable in the browser (noVNC), so Adam can watch or take over
+# (log in to something, solve a captcha) while the agent drives the same
+# screen from Bash with xdotool / scrot / CDP.
+#
+# Everything here runs as the unprivileged `desktop` user and is detached with
+# setsid, so it outlives the agent process: the agent restarts itself often and
+# must not take the display down with it. X11 access control stays at its
+# default (local connections allowed), which is what lets root's Bash drive the
+# display the desktop user owns. Idempotent: safe to rerun.
+set -u
+
+DISPLAY_NUM=${DESKTOP_DISPLAY:-:1}
+GEOMETRY=${DESKTOP_GEOMETRY:-1440x900x24}
+SHARED=${DESKTOP_SHARED:-/home/agent/desktop}
+LOGS=/tmp/desktop
+mkdir -p "$LOGS"
+
+# The one directory the agent and the browser both use: screenshots,
+# downloads, files to upload, and the persistent browser profile. On the
+# volume, so logins survive image pulls. Nothing else under /home/agent is
+# readable by `desktop` (see the entrypoint).
+mkdir -p "$SHARED/profile" "$SHARED/downloads"
+chown -R desktop:desktop "$SHARED"
+
+as_desktop() {
+	setsid -f runuser -u desktop -- env DISPLAY="$DISPLAY_NUM" HOME=/home/desktop "$@"
+}
+
+if ! pgrep -x Xvfb >/dev/null; then
+	as_desktop Xvfb "$DISPLAY_NUM" -screen 0 "$GEOMETRY" -nolisten tcp >"$LOGS/xvfb.log" 2>&1
+	i=0; until [ -S "/tmp/.X11-unix/X${DISPLAY_NUM#:}" ] || [ $i -ge 20 ]; do i=$((i + 1)); sleep 0.25; done
+fi
+pgrep -x openbox >/dev/null || as_desktop openbox >"$LOGS/openbox.log" 2>&1
+pgrep -x x11vnc >/dev/null || as_desktop x11vnc -display "$DISPLAY_NUM" -forever -shared -nopw -localhost -rfbport 5900 -quiet >"$LOGS/x11vnc.log" 2>&1
+# noVNC: the browser-side VNC client, served with websockify on 6080. Bound
+# to every interface because the ingress reaches it over the pod network;
+# the ingress carries the auth.
+pgrep -f "websockify.*6080" >/dev/null || setsid -f websockify --web=/usr/share/novnc 6080 localhost:5900 >"$LOGS/websockify.log" 2>&1
+
+echo "[desktop] display $DISPLAY_NUM up; noVNC on :6080; shared dir $SHARED" >&2

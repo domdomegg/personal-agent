@@ -102,3 +102,14 @@ The acceptance suite covers the requirements end to end — cross-channel memory
 rapid messages, restart safety, self-modification, config recovery, and prompt
 injection — with fake channels, so nothing touches WhatsApp or email. It is
 excluded from `npm test` and from CI.
+
+## Desktop
+
+The container also runs a small desktop the agent can drive: a virtual X
+display (`:1`) with Chromium, viewable in a browser over noVNC on port 6080
+(put an authenticating ingress in front of it). `desktop-start` brings it up
+at boot; `desktop-chromium [url]` (re)starts Chromium with the DevTools
+protocol on `127.0.0.1:9222`. From the agent's shell: `xdotool`, `scrot -o
+~/desktop/shot.png`, or CDP against :9222. Chromium runs as the unprivileged
+`desktop` user; the only path both sides share is `~/desktop` (browser
+profile, downloads, screenshots).

@@ -23,6 +23,19 @@ RUN curl -fsSLo /tmp/ss3.zip https://github.com/adobe-fonts/source-sans/releases
 	&& fc-cache -f \
 	&& rm -rf /tmp/ss3 /tmp/ss3.zip
 
+# A desktop the agent can drive and Adam can watch: a virtual X display (xvfb)
+# with a bare window manager, Chromium, the tools Bash uses to drive it
+# (xdotool, scrot), and x11vnc + noVNC so the screen is viewable in a browser
+# behind the cluster's auth. Chromium runs as the unprivileged `desktop` user:
+# the agent's credentials live under /home/agent and a browser is the one
+# process in here that must not be able to read them. See scripts/desktop/.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	chromium novnc openbox scrot websockify x11vnc xdotool xvfb \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& useradd --create-home --uid 1001 --shell /bin/bash desktop
+COPY scripts/desktop/desktop-start scripts/desktop/desktop-chromium /usr/local/bin/
+ENV DISPLAY=:1
+
 # GitHub CLI, for the agent's own PRs.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 		-o /usr/share/keyrings/githubcli-archive-keyring.gpg \

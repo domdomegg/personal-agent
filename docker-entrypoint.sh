@@ -19,6 +19,15 @@ HOME_DIR=/home/agent
 CREDS="$HOME_DIR/.claude/.credentials.json"
 REPO="$HOME_DIR/src/personal-agent"
 
+# The desktop (see scripts/desktop/desktop-start) runs as the `desktop` user
+# in this same container. Keep the agent's credentials out of its reach: the
+# home stays world-traversable (755) so the shared desktop dir underneath is
+# usable, but the directories holding secrets are root-only.
+for d in "$HOME_DIR/.claude" "$HOME_DIR/.kube" "$HOME_DIR/.config" "$HOME_DIR/.ssh"; do
+	[ -d "$d" ] && chmod 700 "$d"
+done
+desktop-start || echo "[entrypoint] desktop failed to start; carrying on without it" >&2
+
 if [ ! -d "$REPO/.git" ] && [ -n "${AGENT_REPO:-}" ]; then
 	echo "[entrypoint] cloning $AGENT_REPO" >&2
 	git clone "$AGENT_REPO" "$REPO" || true

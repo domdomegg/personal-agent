@@ -1,0 +1,20 @@
+#!/bin/sh
+# (Re)start Chromium on the agent's desktop, as the `desktop` user, with the
+# DevTools protocol on 127.0.0.1:9222 so the agent can drive pages over CDP
+# (reliable) and fall back to xdotool for anything else. The profile lives in
+# the shared dir on the volume, so logins persist. Any arguments are passed
+# through, e.g. a URL to open.
+#
+# --no-sandbox: the container has no user namespaces for Chromium's own
+# sandbox; running as a non-root user is the isolation we rely on instead.
+set -u
+SHARED=${DESKTOP_SHARED:-/home/agent/desktop}
+pkill -u desktop -x chromium 2>/dev/null || true
+sleep 0.5
+setsid -f runuser -u desktop -- env DISPLAY="${DESKTOP_DISPLAY:-:1}" HOME=/home/desktop \
+	chromium --no-sandbox --disable-dev-shm-usage --disable-gpu \
+	--remote-debugging-port=9222 --user-data-dir="$SHARED/profile" \
+	--no-first-run --no-default-browser-check --window-size=1400,860 --window-position=20,20 \
+	"$@" >/tmp/desktop/chromium.log 2>&1
+i=0; until curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1 || [ $i -ge 40 ]; do i=$((i + 1)); sleep 0.25; done
+curl -fsS http://127.0.0.1:9222/json/version | grep -m1 '"Browser"' || { echo "[desktop] chromium did not come up; see /tmp/desktop/chromium.log" >&2; exit 1; }
