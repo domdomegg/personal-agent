@@ -93,7 +93,7 @@ export function streamPage(): string {
 </style>
 <header>
   <h1>AGENT</h1>
-  <nav><a href="/connect">connect</a></nav>
+  <nav><a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
   <span class="status">
     <!-- Clawd, measured off the official sticker art (run-length analysis of
          the pixel grid): 12x8 units — 8x6 body, eyes 1 in from each edge on
