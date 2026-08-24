@@ -5,14 +5,16 @@
 # the shared dir on the volume, so logins persist. Any arguments are passed
 # through, e.g. a URL to open.
 #
-# --no-sandbox: the container has no user namespaces for Chromium's own
-# sandbox; running as a non-root user is the isolation we rely on instead.
+# Chromium keeps its own sandbox: this pod allows unprivileged user namespaces
+# (kernel.unprivileged_userns_clone=1) and Chromium runs as the non-root
+# `desktop` user, so the namespace sandbox works without --no-sandbox (verified
+# 2026-08-24). --disable-dev-shm-usage: /dev/shm is tiny in a container.
 set -u
 SHARED=${DESKTOP_SHARED:-/home/agent/desktop}
 pkill -u desktop -x chromium 2>/dev/null || true
 sleep 0.5
 setsid -f runuser -u desktop -- env DISPLAY="${DESKTOP_DISPLAY:-:1}" HOME=/home/desktop \
-	chromium --no-sandbox --disable-dev-shm-usage --disable-gpu \
+	chromium --disable-dev-shm-usage --disable-gpu \
 	--remote-debugging-port=9222 --user-data-dir="$SHARED/profile" \
 	--no-first-run --no-default-browser-check --window-size=1400,860 --window-position=20,20 \
 	"$@" >/tmp/desktop/chromium.log 2>&1
