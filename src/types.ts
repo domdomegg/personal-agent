@@ -124,9 +124,6 @@ export type Config = {
 	/** Fixed id for the agent's one continuous conversation (F2). */
 	sessionId: string;
 
-	/** Prepended to the agent's system prompt. Where behavioural limits live. */
-	systemPrompt: string;
-
 	/** Claude Code model. Pinned so it does not depend on when the session began. */
 	model: string;
 

@@ -1,6 +1,5 @@
 {
 	"sessionId": "REPLACE-WITH-A-UUID",
-	"systemPrompt": "",
 	"model": "claude-fable-5",
 	"fallbackModel": "claude-opus-5",
 	"workingDirectory": ".",

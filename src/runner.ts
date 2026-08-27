@@ -14,7 +14,6 @@ import type {AgentEvent} from './types.js';
 
 export type RunnerOptions = {
 	sessionId: string;
-	systemPrompt: string;
 	/** Claude Code model alias or full name, e.g. `fable` or `claude-fable-5`. */
 	model: string;
 	/** Retried on once if `model` declines to answer. Omit to disable. */
@@ -294,8 +293,6 @@ export class Runner {
 				// changes if it is ever recreated.
 				'--model',
 				model,
-				'--append-system-prompt',
-				this.options.systemPrompt,
 				// `auto` lets Claude Code apply its own judgement about what needs
 				// confirming, rather than disabling the check entirely. There is no
 				// human at a terminal to approve anything, but that is a reason to

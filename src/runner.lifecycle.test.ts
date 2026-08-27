@@ -124,7 +124,6 @@ function received(recvLogPath: string): string[] {
 function makeRunner(claudePath: string, lingerMs: number): Runner {
 	return new Runner({
 		sessionId: randomUUID(),
-		systemPrompt: 'stub',
 		model: 'stub-model',
 		workingDirectory: tmpdir(),
 		claudePath,

@@ -12,7 +12,7 @@ the missing push path. It is plumbing only — no agent logic, no tool implement
 All capability comes from Claude Code and its MCP servers.
 
 A second goal, equal in weight: **the agent can change anything about itself without a
-human** — channels, schedule, its own system prompt, its own code — including
+human** — channels, schedule, its own instructions (CLAUDE.md), its own code — including
 restarting itself to apply the change.
 
 ## Terminology
@@ -57,7 +57,7 @@ restarting itself to apply the change.
 ### Self-management
 
 - M1. Config and code live in a git repository the agent has write access to.
-- M2. The agent can change anything about itself — channels, schedule, system prompt,
+- M2. The agent can change anything about itself — channels, schedule, instructions,
   its own code — and commit and push that change.
 - M3. The agent can apply a change to itself: hot-reload or restart. A restart must
   survive the agent initiating it: the process comes back without a human, and the
@@ -68,8 +68,8 @@ restarting itself to apply the change.
 
 ### Security
 
-Boundaries are set by the system prompt and Claude Code's own permission handling, not
-by a bespoke permission layer in this service. The system prompt should tell the agent
+Boundaries are set by the instructions in CLAUDE.md and Claude Code's own permission handling, not
+by a bespoke permission layer in this service. The instructions should tell the agent
 to check with the owner before irreversible or outward-facing actions — payments,
 messaging third parties, destructive deletions. This is guidance to a capable agent,
 not a technical control, and the service must not reimplement MCP-level permissions.

@@ -28,7 +28,7 @@ schedule ─┘            (dedupe)         │
   queueing behind it.
 - **Idle is free.** Claude Code is invoked only when there is a real event.
 - **It can change itself.** The agent runs in its own repo and can edit its
-  config, schedule, system prompt, and code, then commit and restart.
+  config, schedule, instructions (`CLAUDE.md`), and code, then commit and restart.
 
 ## Setup
 
@@ -55,7 +55,6 @@ Config lives in `agent.config.json` (`AGENT_CONFIG` to override), state in
 | Field | Meaning |
 | --- | --- |
 | `sessionId` | UUID for the continuous conversation. Generate once. |
-| `systemPrompt` | Prepended to the agent's instructions. |
 | `model` | Claude Code model. Pinned, so it doesn't depend on when the session began. |
 | `workingDirectory` | Where Claude Code runs — this repo, so it can edit itself. |
 | `channels.whatsapp.ownerJids` | Only messages from these JIDs are acted on. Replies go to the first. WhatsApp surfaces one person under both a phone-number and a `@lid` JID, so you usually want both. |
@@ -86,7 +85,8 @@ Only the owner can trigger a run — messages from anyone else are dropped befor
 Claude sees them. Third-party content reaches the agent only when the owner
 forwards it, and is presented as data rather than instructions.
 
-Beyond that, boundaries come from the system prompt, not a bespoke permission
+Beyond that, boundaries come from the instructions in `CLAUDE.md` (which Claude
+Code loads from the working directory), not a bespoke permission
 layer: the agent is asked to check before payments, messaging third parties, and
 unrecoverable deletions. This is guidance to a capable agent, and the acceptance
 suite tests it against a real injection attempt.

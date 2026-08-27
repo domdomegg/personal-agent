@@ -128,4 +128,4 @@ agent.config.json
 agent.config.json.last-good
 undelivered-replies.jsonl
 .restart-pending
-CLAUDE.md
+CLAUDE.local.md

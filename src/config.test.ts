@@ -5,7 +5,7 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
-	loadConfig, defaultConfig, writeConfig, DEFAULT_SYSTEM_PROMPT,
+	loadConfig, defaultConfig, writeConfig,
 } from './config.js';
 
 let directory: string;
@@ -65,28 +65,6 @@ describe('config loading', () => {
 		loadConfig(configPath);
 		// Still recoverable on a subsequent load.
 		expect(loadConfig(configPath).config.sessionId).toBe('good');
-	});
-});
-
-describe('system prompt fallback', () => {
-	test('an empty systemPrompt falls back to the default', () => {
-		// Otherwise the agent never learns the reply format and every reply is
-		// silently dropped.
-		writeFileSync(configPath, JSON.stringify({
-			sessionId: 'abc',
-			workingDirectory: '/tmp',
-			systemPrompt: '',
-		}));
-		expect(loadConfig(configPath).config.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
-	});
-
-	test('a real systemPrompt is respected', () => {
-		writeFileSync(configPath, JSON.stringify({
-			sessionId: 'abc',
-			workingDirectory: '/tmp',
-			systemPrompt: 'custom',
-		}));
-		expect(loadConfig(configPath).config.systemPrompt).toBe('custom');
 	});
 });
 

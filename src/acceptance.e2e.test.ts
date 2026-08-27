@@ -28,7 +28,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createAgent, type Agent} from './index.js';
 import {
-	defaultConfig, DEFAULT_SYSTEM_PROMPT, loadConfig, writeConfig,
+	defaultConfig, loadConfig, writeConfig,
 } from './config.js';
 import type {AgentEvent, Channel, Config} from './types.js';
 
@@ -125,10 +125,13 @@ function makeService(overrides: Partial<Config> = {}, statePath = join(directory
 	const sendsPath = join(mkdtempSync(join(tmpdir(), 'agent-sends-')), 'sends.jsonl');
 	stubCallMcp(sendsPath);
 
+	// Claude Code reads the agent's instructions from CLAUDE.md in the working
+	// directory, so the real one is copied in.
+	writeFileSync(join(directory, 'CLAUDE.md'), readFileSync(join(import.meta.dirname, '..', 'CLAUDE.md'), 'utf8'));
+
 	const config: Config = {
 		...defaultConfig(),
 		sessionId: randomUUID(),
-		systemPrompt: DEFAULT_SYSTEM_PROMPT,
 		workingDirectory: directory,
 		...overrides,
 	};

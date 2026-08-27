@@ -20,7 +20,7 @@ export {Runner} from './runner.js';
 export {Dispatcher} from './dispatcher.js';
 export {Scheduler} from './scheduler.js';
 export {
-	loadConfig, writeConfig, defaultConfig, DEFAULT_SYSTEM_PROMPT,
+	loadConfig, writeConfig, defaultConfig,
 } from './config.js';
 export {createMcpCaller} from './mcp.js';
 
@@ -84,7 +84,6 @@ export function createAgent(options: AgentOptions): Agent {
 
 	const runner = new Runner({
 		sessionId: config.sessionId,
-		systemPrompt: config.systemPrompt,
 		model: config.model,
 		fallbackModel: config.fallbackModel,
 		workingDirectory: config.workingDirectory,
