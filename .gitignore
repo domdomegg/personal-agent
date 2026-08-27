@@ -129,3 +129,5 @@ agent.config.json.last-good
 undelivered-replies.jsonl
 .restart-pending
 CLAUDE.local.md
+# agent scratch space (memes, scripts); never part of the repo
+work/
