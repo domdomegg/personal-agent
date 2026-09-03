@@ -1,6 +1,6 @@
 {
 	"sessionId": "REPLACE-WITH-A-UUID",
-	"model": "claude-fable-5",
+	"model": "claude-fable-5-1",
 	"fallbackModel": "claude-opus-5",
 	"workingDirectory": ".",
 	"channels": {

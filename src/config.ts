@@ -14,8 +14,8 @@ import type {Config} from './types.js';
 // The agent's instructions live in CLAUDE.md at the repo root (committed,
 // public) and CLAUDE.local.md (gitignored, personal data), which Claude Code
 // loads itself from the working directory. There is no system prompt here.
-/** Fable 5: the most capable of the current line. */
-export const DEFAULT_MODEL = 'claude-fable-5';
+/** Fable 5.1: the most capable of the current line. */
+export const DEFAULT_MODEL = 'claude-fable-5-1';
 
 const FALLBACK_SUFFIX = '.last-good';
 
