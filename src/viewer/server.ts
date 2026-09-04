@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import {dirname, basename} from 'node:path';
 import {hostname} from 'node:os';
-import {readTranscript, type Entry} from './transcript.js';
+import {readTranscript, readImage, type Entry} from './transcript.js';
 import {streamPage} from './stream.js';
 import {connectPage} from './connect.js';
 
@@ -149,6 +149,32 @@ export function startViewer(options: ViewerOptions): Viewer {
 
 		if (url.pathname === '/api/version') {
 			send(200, 'application/json', JSON.stringify({version, changedAt}));
+			return;
+		}
+
+		// Images referenced by entries, fetched when a row is expanded. The id
+		// names a specific block of a specific tool call, so the bytes never
+		// change and the browser may cache them for good.
+		if (url.pathname === '/api/image') {
+			const id = url.searchParams.get('id') ?? '';
+			if (!existsSync(options.transcriptPath)) {
+				send(404, 'text/plain', 'no transcript');
+				return;
+			}
+
+			readImage(options.transcriptPath, id)
+				.then((image) => {
+					if (!image) {
+						send(404, 'text/plain', 'no such image');
+						return;
+					}
+
+					response.writeHead(200, {'content-type': image.mediaType, 'cache-control': 'private, max-age=31536000, immutable'});
+					response.end(image.data);
+				})
+				.catch((error: unknown) => {
+					send(500, 'text/plain', String(error));
+				});
 			return;
 		}
 

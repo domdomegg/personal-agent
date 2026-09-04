@@ -18,6 +18,15 @@ export type ToolDetail =
 	| {type: 'write'; filePath: string; content: string}
 	| {type: 'json'; json: string};
 
+/**
+ * An image in a tool call, referenced rather than embedded: the entries feed is
+ * re-fetched whenever the transcript changes, and a screenshot is ~100KB of
+ * base64. The viewer loads /api/image?id=... on demand instead. `in` images
+ * are base64 fields of the tool's input (a file being sent); `out` images are
+ * image blocks in its result (a screenshot read back, a downloaded photo).
+ */
+export type ImageRef = {id: string; direction: 'in' | 'out'};
+
 export type Entry =
 	/** `queued` marks a message that arrived while a turn was already running. */
 	| {kind: 'incoming'; at: string; text: string; queued?: boolean}
@@ -36,7 +45,9 @@ export type Entry =
 	 * is working-out that Adam never saw.
 	 */
 	| {kind: 'notes'; at: string; text: string}
-	| {kind: 'tool'; at: string; name: string; input: string; detail?: ToolDetail; result?: string; failed?: boolean};
+	| {
+		kind: 'tool'; at: string; name: string; input: string; detail?: ToolDetail; result?: string; failed?: boolean; images?: ImageRef[];
+	};
 
 /**
  * The runner delivers a line of exactly this form plus the text following it.
@@ -122,12 +133,7 @@ export async function readTranscript(path: string): Promise<Entry[]> {
 					? toolsById.get(block.tool_use_id)
 					: undefined;
 				if (call) {
-					call.result = flatten(block.content).slice(0, 4000);
-					// For a reply row, "failed" means undelivered: the send tool
-					// reports {"success":true,...} on stdout only when it went through.
-					call.failed = call.kind === 'reply'
-						? block.is_error === true || !call.result.includes('"success":true')
-						: block.is_error === true;
+					applyResult(call, block);
 				}
 			}
 
@@ -154,6 +160,7 @@ export async function readTranscript(path: string): Promise<Entry[]> {
 						name,
 						input: describeInput(block.input),
 						...describeDetail(name, block.input),
+						...describeInputImages(block.id, block.input),
 					};
 				toolsById.set(block.id, entry);
 				entries.push(entry);
@@ -261,7 +268,10 @@ function describeDetail(name: string, input: unknown): {detail?: ToolDetail} {
 		return {detail: {type: 'write', filePath: record.file_path, content: record.content}};
 	}
 
-	const json = JSON.stringify(record, undefined, 2);
+	// A base64 image in the input is shown as an image, not 100KB of text.
+	const json = JSON.stringify(record, (_key, value: unknown) => (
+		typeof value === 'string' && imageMediaType(value) ? `<${imageMediaType(value) ?? 'image'}, ${value.length} chars base64>` : value
+	), 2);
 	// A one-field input whose value already IS the summary line adds nothing.
 	if (json === '{}' || Object.keys(record).length === 0) {
 		return {};
@@ -301,4 +311,129 @@ function flatten(content: unknown): string {
 			return b?.type === 'text' && typeof b.text === 'string' ? b.text : `[${String(b?.type ?? 'block')}]`;
 		})
 		.join('\n');
+}
+
+/**
+ * Sniff the format of a base64 string by its first bytes. Only the formats
+ * a browser can show; anything else (or ordinary text) is undefined.
+ */
+export function imageMediaType(base64: string): string | undefined {
+	if (base64.length < 64) {
+		return undefined;
+	}
+
+	if (base64.startsWith('iVBORw0KGgo')) {
+		return 'image/png';
+	}
+
+	if (base64.startsWith('/9j/')) {
+		return 'image/jpeg';
+	}
+
+	if (base64.startsWith('R0lGOD')) {
+		return 'image/gif';
+	}
+
+	if (base64.startsWith('UklGR')) {
+		return 'image/webp';
+	}
+
+	return undefined;
+}
+
+/** Back-fill a tool call (or reply row) with its result when that arrives. */
+function applyResult(call: Entry & {kind: 'tool' | 'reply'}, result: Block): void {
+	call.result = flatten(result.content).slice(0, 4000);
+	// For a reply row, "failed" means undelivered: the send tool reports
+	// {"success":true,...} on stdout only when it went through.
+	call.failed = call.kind === 'reply'
+		? result.is_error === true || !call.result.includes('"success":true')
+		: result.is_error === true;
+
+	if (call.kind === 'tool') {
+		const toolUseId = String(result.tool_use_id);
+		const out = imageBlockIndexes(result.content).map((index) => ({id: `${toolUseId}/out/${index}`, direction: 'out' as const}));
+		if (out.length > 0) {
+			call.images = [...(call.images ?? []), ...out];
+		}
+	}
+}
+
+function imageBlockIndexes(content: unknown): number[] {
+	return asBlocks(content)
+		.map((b, index) => (isImageBlock(b) ? index : -1))
+		.filter((index) => index >= 0);
+}
+
+type ImageBlock = {type: 'image'; source: {type: 'base64'; media_type: string; data: string}};
+
+function isImageBlock(block: unknown): block is ImageBlock {
+	if (typeof block !== 'object' || block === null) {
+		return false;
+	}
+
+	const {type, source} = block as {type?: unknown; source?: {type?: unknown; media_type?: unknown; data?: unknown}};
+	return type === 'image' && typeof source === 'object' && source !== null
+		&& source.type === 'base64' && typeof source.media_type === 'string' && typeof source.data === 'string';
+}
+
+/** Top-level string fields of the input that hold a base64 image. */
+function describeInputImages(toolUseId: string, input: unknown): {images?: ImageRef[]} {
+	if (input === null || typeof input !== 'object') {
+		return {};
+	}
+
+	const images = Object.entries(input as Record<string, unknown>)
+		.filter(([, value]) => typeof value === 'string' && imageMediaType(value) !== undefined)
+		.map(([key]) => ({id: `${toolUseId}/in/${key}`, direction: 'in' as const}));
+	return images.length > 0 ? {images} : {};
+}
+
+/**
+ * Resolve an ImageRef id back to bytes by rescanning the transcript for the
+ * tool call it names. A full read per image, but images are fetched only when
+ * a row is expanded, and the id is content-stable so the browser caches it.
+ */
+export async function readImage(path: string, id: string): Promise<{mediaType: string; data: Buffer} | undefined> {
+	const match = /^(?<toolUseId>[^/]+)\/(?<direction>in|out)\/(?<where>.+)$/.exec(id);
+	if (!match?.groups) {
+		return undefined;
+	}
+
+	const {toolUseId, direction, where} = match.groups;
+	const rl = createInterface({input: createReadStream(path), crlfDelay: Infinity});
+	for await (const line of rl) {
+		if (!line.includes(toolUseId ?? '')) {
+			continue;
+		}
+
+		let raw: Raw;
+		try {
+			raw = JSON.parse(line) as Raw;
+		} catch {
+			continue;
+		}
+
+		for (const block of asBlocks(raw.message?.content)) {
+			if (direction === 'out' && block.type === 'tool_result' && block.tool_use_id === toolUseId) {
+				const image = asBlocks(block.content)[Number(where)];
+				if (isImageBlock(image)) {
+					rl.close();
+					return {mediaType: image.source.media_type, data: Buffer.from(image.source.data, 'base64')};
+				}
+			}
+
+			if (direction === 'in' && block.type === 'tool_use' && block.id === toolUseId
+				&& block.input !== null && typeof block.input === 'object') {
+				const value = (block.input as Record<string, unknown>)[where ?? ''];
+				const mediaType = typeof value === 'string' ? imageMediaType(value) : undefined;
+				if (typeof value === 'string' && mediaType) {
+					rl.close();
+					return {mediaType, data: Buffer.from(value, 'base64')};
+				}
+			}
+		}
+	}
+
+	return undefined;
 }

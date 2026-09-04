@@ -101,3 +101,39 @@ test('other tools carry their full input as JSON detail', async () => {
 	expect(detail?.json).toContain('240000');
 	expect(detail?.json).toContain('run_in_background');
 });
+
+// Screenshots (Read on a png) and downloaded photos come back as image blocks
+// in the tool result; files the agent sends go out as base64 fields. Both are
+// referenced, not embedded, so the entries feed stays small.
+const PNG_B64 = `iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==${'A'.repeat(40)}`;
+
+test('image results and inputs are referenced and can be read back', async () => {
+	const {readImage, imageMediaType} = await import('./transcript.js');
+	const path = write([
+		toolUse('t1', 'Read', {file_path: '/tmp/shot.png'}),
+		{
+			type: 'user',
+			message: {
+				role: 'user', content: [{
+					type: 'tool_result', tool_use_id: 't1', content: [{type: 'image', source: {type: 'base64', media_type: 'image/png', data: PNG_B64}}],
+				}],
+			},
+		},
+		toolUse('t2', 'mcp__homelab__whatsapp-claube__send_file', {recipient: 'x', filename: 'a.png', file_content_base64: PNG_B64}),
+	]);
+	const entries = await readTranscript(path);
+	const [read, send] = entries.filter((e) => e.kind === 'tool');
+	expect(read?.kind === 'tool' && read.images).toEqual([{id: 't1/out/0', direction: 'out'}]);
+	expect(send?.kind === 'tool' && send.images).toEqual([{id: 't2/in/file_content_base64', direction: 'in'}]);
+	// The JSON detail does not carry the base64 blob.
+	expect(send?.kind === 'tool' && send.detail?.type === 'json' && send.detail.json).toContain('image/png');
+	expect(send?.kind === 'tool' && send.detail?.type === 'json' && send.detail.json).not.toContain(PNG_B64);
+
+	const out = await readImage(path, 't1/out/0');
+	expect(out?.mediaType).toBe('image/png');
+	expect(out?.data.subarray(1, 4).toString()).toBe('PNG');
+	const input = await readImage(path, 't2/in/file_content_base64');
+	expect(input?.mediaType).toBe('image/png');
+	expect(await readImage(path, 't9/out/0')).toBeUndefined();
+	expect(imageMediaType('hello world, not an image at all, just some ordinary text content here')).toBeUndefined();
+});

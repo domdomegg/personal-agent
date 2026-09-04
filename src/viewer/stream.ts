@@ -80,6 +80,10 @@ export function streamPage(): string {
   .row.tool .body b { font-weight: 600; color: var(--text); }
   details > summary { cursor: pointer; list-style: none; color: var(--dim); }
   details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '▸ '; }
+  details[open] > summary::before { content: '▾ '; }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 2px; }
+  .shots img { max-width: min(100%, 720px); max-height: 420px; border: 1px solid var(--line); border-radius: 3px; background: #101318; }
   pre {
     margin: 6px 0 2px; padding: 8px 10px; background: #101318;
     border-left: 2px solid var(--line); overflow-x: auto; max-height: 340px;
@@ -239,9 +243,9 @@ function render(entries) {
       if (e.detail) {
         const d = document.createElement('details');
         const s = document.createElement('summary');
-        s.textContent = e.detail.type === 'edit' ? '▸ diff'
-          : e.detail.type === 'write' ? '▸ content (' + e.detail.content.split('\\n').length + ' lines)'
-          : '▸ input';
+        s.textContent = e.detail.type === 'edit' ? 'diff'
+          : e.detail.type === 'write' ? 'content (' + e.detail.content.split('\\n').length + ' lines)'
+          : 'input';
         d.append(s);
         if (e.detail.type === 'json') {
           const pre = document.createElement('pre');
@@ -256,7 +260,7 @@ function render(entries) {
       if (e.result) {
         const d = document.createElement('details');
         const lines = e.result.split('\\n').length;
-        d.innerHTML = '<summary>▸ output (' + lines + ' lines)</summary>';
+        d.innerHTML = '<summary>output (' + lines + ' lines)</summary>';
         const pre = document.createElement('pre');
         pre.textContent = e.result;
         d.append(pre);
@@ -270,13 +274,37 @@ function render(entries) {
         wait.textContent = '· running';
         body.append(wait);
       }
+      // Screenshots read back, photos downloaded, files sent: shown as
+      // pictures, loaded only once the row is expanded.
+      for (const direction of ['in', 'out']) {
+        const refs = (e.images || []).filter((r) => r.direction === direction);
+        if (!refs.length) continue;
+        const d = document.createElement('details');
+        const s = document.createElement('summary');
+        s.textContent = (direction === 'in' ? 'image sent' : 'image') + (refs.length > 1 ? 's (' + refs.length + ')' : '');
+        const shots = document.createElement('div');
+        shots.className = 'shots';
+        for (const r of refs) {
+          const a = document.createElement('a');
+          a.href = '/api/image?id=' + encodeURIComponent(r.id);
+          a.target = '_blank';
+          const img = document.createElement('img');
+          img.loading = 'lazy';
+          img.src = a.href;
+          a.append(img);
+          shots.append(a);
+        }
+        d.append(s, shots);
+        keepOpen(d, key + '/img/' + direction);
+        body.append(d);
+      }
     } else if (e.kind === 'reply') {
       body.textContent = e.text;
       if (!e.result) {
         row.classList.add('running');
       } else if (e.failed) {
         const d = document.createElement('details');
-        d.innerHTML = '<summary>▸ send error</summary>';
+        d.innerHTML = '<summary>send error</summary>';
         const pre = document.createElement('pre');
         pre.textContent = e.result;
         d.append(pre);
