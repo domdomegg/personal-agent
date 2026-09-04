@@ -123,12 +123,6 @@ export class Runner {
 	/** False until the session has been created by a first run. */
 	private started: boolean;
 
-	/**
-	 * The model runs actually use: the configured one, until it proves unusable
-	 * and runWithFallback switches to the fallback for the rest of the process.
-	 */
-	private modelOverride: string | undefined;
-
 	constructor(private readonly options: RunnerOptions) {
 		// A caller that already has a session (e.g. after a service restart)
 		// resumes it rather than trying to create it again.
@@ -224,35 +218,8 @@ export class Runner {
 	 * not to shop around for a permissive one.
 	 */
 	private async runWithFallback(events: AgentEvent[]): Promise<void> {
-		const {fallbackModel} = this.options;
-		const model = this.modelOverride ?? this.options.model;
-		const {refused, modelError} = await this.startRun(events, model);
-
-		if (modelError !== undefined && fallbackModel && fallbackModel !== model) {
-			// The model cannot be used at all, which repeats identically on every
-			// run — so unlike a refusal this switch is sticky. Seen 2026-09-03: a
-			// self-restart came back on the image's older Claude Code, which
-			// rejected the newly configured model id with a 400, and every run
-			// died the same way for 16 hours until Adam rebuilt the image. The
-			// fallback run carries a notice so the agent tells the owner and can
-			// fix the cause itself instead of sitting dead.
-			this.modelOverride = fallbackModel;
-			this.options.log?.('model unusable, running on fallback until restart', {model, fallbackModel, error: modelError});
-			const notice: AgentEvent = {
-				id: `model-fallback-${Date.now()}`,
-				channel: 'system',
-				threadId: '',
-				text: `The configured model ${model} cannot be used: the previous run failed with "${modelError}". This run and every later run use the fallback model ${fallbackModel} until the service restarts. Tell the owner, and fix the cause (the model in agent.config.json, or the Claude Code version in the image) before restarting.`,
-				timestamp: new Date(),
-			};
-			const retry = await this.startRun([notice, ...events], fallbackModel);
-			if (retry.modelError !== undefined) {
-				this.options.log?.('fallback model also unusable', {fallbackModel, error: retry.modelError});
-			}
-
-			return;
-		}
-
+		const {model, fallbackModel} = this.options;
+		const {refused} = await this.startRun(events, model);
 		if (!refused || !fallbackModel || fallbackModel === model) {
 			if (refused) {
 				// Without a fallback the message is simply dropped, so say so
@@ -301,7 +268,7 @@ export class Runner {
 		}
 	}
 
-	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{refused: boolean; modelError?: string | undefined}> {
+	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{refused: boolean}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
 		// in use". Subsequent runs must --resume it instead. That resumption is
@@ -346,7 +313,6 @@ export class Runner {
 		}
 
 		let refused = false;
-		let modelError: string | undefined;
 		let compactRequested = false;
 		let justCompacted = false;
 
@@ -377,8 +343,6 @@ export class Runner {
 			if (isRefusal(parsed)) {
 				refused = true;
 			}
-
-			modelError ??= modelUnusableError(parsed);
 
 			// The agent sends its own messages over MCP; assistant text is only
 			// scanned for directives to the harness, never delivered anywhere.
@@ -564,7 +528,7 @@ export class Runner {
 			rl.close();
 		}
 
-		return {refused, modelError};
+		return {refused};
 	}
 }
 
@@ -606,31 +570,6 @@ export function isRefusal(message: unknown): boolean {
 
 	const {stop_reason: stopReason, model} = inner as Record<string, unknown>;
 	return stopReason === 'refusal' && model === '<synthetic>';
-}
-
-/**
- * The model cannot be used at all, as opposed to declining (isRefusal) or a
- * transient failure. Claude Code relays the API's rejection as a synthetic
- * assistant message whose text begins "API Error: 400 ..." — e.g. "Claude Code
- * 2.1.241 does not support this model", or a 404 for an unknown model id.
- * Returns the error text, or undefined.
- *
- * Deliberately only 400/404 that mention the model: auth failures, rate
- * limits and overloads are not the model's fault, and switching models on
- * those would be shopping around rather than recovering.
- */
-export function modelUnusableError(message: unknown): string | undefined {
-	const text = extractAssistantText(message);
-	if (text === undefined) {
-		return undefined;
-	}
-
-	const inner = (message as {message: Record<string, unknown>}).message;
-	if (inner.model !== '<synthetic>') {
-		return undefined;
-	}
-
-	return /^API Error: (?:400|404)\b[^\n]*\bmodel\b/i.test(text) ? text.split('\n')[0] : undefined;
 }
 
 /** Pull assistant prose out of a stream-json line, ignoring tool calls. */

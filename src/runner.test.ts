@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
 import {
-	formatEvent, isRefusal, modelUnusableError, wantsCompact,
+	formatEvent, isRefusal, wantsCompact,
 } from './runner.js';
 
 describe('formatEvent', () => {
@@ -112,35 +112,5 @@ describe('isRefusal', () => {
 		expect(isRefusal({type: 'assistant'})).toBe(false);
 		expect(isRefusal(undefined)).toBe(false);
 		expect(isRefusal('refusal')).toBe(false);
-	});
-});
-
-// 2026-09-03: a self-restart came back on an older Claude Code that rejected
-// the configured model; every run failed identically and the agent sat dead
-// for 16 hours. Detecting that rejection is what lets runWithFallback switch.
-describe('modelUnusableError', () => {
-	const synthetic = (text: string, model = '<synthetic>') => ({
-		type: 'assistant',
-		message: {model, stop_reason: 'stop_sequence', content: [{type: 'text', text}]},
-	});
-
-	test('detects an unsupported-model rejection', () => {
-		const text = 'API Error: 400 Claude Code 2.1.241 does not support this model; version 2.1.251 or newer is required.';
-		expect(modelUnusableError(synthetic(text))).toBe(text);
-	});
-
-	test('detects an unknown model id', () => {
-		expect(modelUnusableError(synthetic('API Error: 404 {"type":"not_found_error","message":"model: claude-nope"}'))).toBeDefined();
-	});
-
-	test('ignores auth, rate-limit and overload errors', () => {
-		expect(modelUnusableError(synthetic('API Error: 401 authentication_error: token expired for model access'))).toBeUndefined();
-		expect(modelUnusableError(synthetic('API Error: 429 rate_limit_error: this model is busy'))).toBeUndefined();
-		expect(modelUnusableError(synthetic('API Error: 529 overloaded_error'))).toBeUndefined();
-	});
-
-	test('ignores a real model talking about API errors', () => {
-		expect(modelUnusableError(synthetic('API Error: 400 ... is what the model said', 'claude-fable-5-1'))).toBeUndefined();
-		expect(modelUnusableError({type: 'result', is_error: true, num_turns: 1})).toBeUndefined();
 	});
 });
