@@ -32,6 +32,8 @@ type StubOptions = {
 	logPath: string;
 	/** File the stub appends `msg`/`nudge` per received user message, if set. */
 	recvLogPath?: string;
+	/** A --model the stub rejects with a synthetic "API Error: 400", like a CLI too old for it. */
+	rejectModel?: string;
 };
 
 /**
@@ -50,7 +52,9 @@ const DELAY = ${options.delayMs ?? 0};
 const EXIT_DELAY = ${options.exitDelayMs ?? 0};
 const LOG = ${JSON.stringify(options.logPath)};
 const RECV_LOG = ${JSON.stringify(options.recvLogPath ?? '')};
-appendFileSync(LOG, 'spawn ' + process.pid + ' ' + Date.now() + '\\n');
+const REJECT = ${JSON.stringify(options.rejectModel ?? '')};
+const MODEL = process.argv[process.argv.indexOf('--model') + 1];
+appendFileSync(LOG, 'spawn ' + process.pid + ' ' + Date.now() + ' ' + MODEL + '\\n');
 const rl = createInterface({input: process.stdin});
 let queue = Promise.resolve();
 rl.on('line', (line) => {
@@ -62,6 +66,11 @@ rl.on('line', (line) => {
 	if (RECV_LOG) appendFileSync(RECV_LOG, (isNudge ? 'nudge' : 'msg') + '\\n');
 	queue = queue.then(async () => {
 		if (DELAY) await new Promise((r) => setTimeout(r, DELAY));
+		if (REJECT && MODEL === REJECT) {
+			process.stdout.write(JSON.stringify({type: 'assistant', message: {model: '<synthetic>', stop_reason: 'stop_sequence', content: [{type: 'text', text: 'API Error: 400 Claude Code 0.0.1 does not support this model; version 9.9.9 or newer is required.'}]}}) + '\\n');
+			process.stdout.write(JSON.stringify({type: 'result', is_error: true, num_turns: 1}) + '\\n');
+			return;
+		}
 		process.stdout.write(JSON.stringify({type: 'result', is_error: false, num_turns: 1}) + '\\n');
 	});
 });
@@ -102,7 +111,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<vo
 	}
 }
 
-type LifecycleLine = {kind: string; pid: string; at: number};
+type LifecycleLine = {kind: string; pid: string; at: number; model?: string};
 
 function lifecycle(logPath: string): LifecycleLine[] {
 	const raw = readFileSync(logPath, 'utf8').trim();
@@ -111,8 +120,10 @@ function lifecycle(logPath: string): LifecycleLine[] {
 	}
 
 	return raw.split('\n').map((line) => {
-		const [kind, pid, at] = line.split(' ');
-		return {kind: kind ?? '', pid: pid ?? '', at: Number(at)};
+		const [kind, pid, at, model] = line.split(' ');
+		return {
+			kind: kind ?? '', pid: pid ?? '', at: Number(at), model,
+		};
 	});
 }
 
@@ -261,5 +272,34 @@ describe('run lifecycle', () => {
 		await runner.submit(makeEvent('background chatter', 'summarise weekly'));
 
 		expect(received(recvLogPath)).toEqual(['msg']);
+	});
+
+	// 2026-09-03: the configured model was rejected by an older Claude Code on
+	// every run, and nothing switched away from it. The first rejection must
+	// move to the fallback (carrying the same events plus a notice), and later
+	// runs must go straight to the fallback rather than fail again first.
+	test('a model the CLI rejects is swapped for the fallback, and stays swapped', async () => {
+		const {logPath, recvLogPath} = scratchLogs();
+		const claudePath = stubClaude({
+			logPath, recvLogPath, rejectModel: 'new-model',
+		});
+		const runner = new Runner({
+			sessionId: randomUUID(),
+			model: 'new-model',
+			fallbackModel: 'stub-model',
+			workingDirectory: tmpdir(),
+			claudePath,
+			lingerMs: 50,
+		});
+
+		await runner.submit(makeEvent('A', 'watch'));
+		let spawns = lifecycle(logPath).filter((l) => l.kind === 'spawn');
+		expect(spawns.map((l) => l.model)).toEqual(['new-model', 'stub-model']);
+		// The rejected run saw A; the fallback run saw the notice and A again.
+		expect(received(recvLogPath)).toEqual(['msg', 'msg', 'msg']);
+
+		await runner.submit(makeEvent('B', 'watch'));
+		spawns = lifecycle(logPath).filter((l) => l.kind === 'spawn');
+		expect(spawns.map((l) => l.model)).toEqual(['new-model', 'stub-model', 'stub-model']);
 	});
 });

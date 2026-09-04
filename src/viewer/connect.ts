@@ -33,7 +33,9 @@ export function connectPage(options: {podName: string; namespace: string; contai
     padding: 8px 14px; display: flex; align-items: center; gap: 12px;
   }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .04em; }
-  nav a { color: var(--dim); text-decoration: none; }
+  nav a { color: var(--dim); text-decoration: none; margin-right: 10px; padding-bottom: 2px; }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--text); border-bottom: 1px solid var(--text); }
   main { max-width: 720px; margin: 0 auto; padding: 24px 16px 96px; }
   h2 { font-size: 13px; margin: 28px 0 8px; }
   p, li { color: #aeb4bd; }
@@ -46,7 +48,7 @@ export function connectPage(options: {podName: string; namespace: string; contai
   .button:hover { background: #21324f; }
   .dim { color: var(--dim); }
 </style>
-<header><h1>AGENT</h1><nav><a href="/">activity</a></nav></header>
+<header><h1>AGENT</h1><nav><a href="/">activity</a> <a href="/desktop" target="_blank">desktop</a> <a class="active" href="/connect">connect</a></nav></header>
 <main>
   <h2>Open this machine in VS Code</h2>
   <p>Files live in <code>/home/agent/src</code> in the pod

@@ -30,8 +30,9 @@ export function streamPage(): string {
     padding: 8px 14px; display: flex; align-items: center; gap: 12px;
   }
   header h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .04em; }
-  nav a { color: var(--dim); text-decoration: none; margin-right: 10px; }
+  nav a { color: var(--dim); text-decoration: none; margin-right: 10px; padding-bottom: 2px; }
   nav a:hover { color: var(--text); }
+  nav a.active { color: var(--text); border-bottom: 1px solid var(--text); }
   .status { margin-left: auto; color: var(--dim); display: flex; align-items: center; gap: 8px; }
 
   /* Clawd: the official Claude Code pixel sprite (16x14, squares only),
@@ -93,7 +94,7 @@ export function streamPage(): string {
 </style>
 <header>
   <h1>AGENT</h1>
-  <nav><a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
+  <nav><a class="active" href="/">activity</a> <a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
   <span class="status">
     <!-- Clawd, measured off the official sticker art (run-length analysis of
          the pixel grid): 12x8 units — 8x6 body, eyes 1 in from each edge on
