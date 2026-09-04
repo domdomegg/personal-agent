@@ -28,6 +28,16 @@ for d in "$HOME_DIR/.claude" "$HOME_DIR/.kube" "$HOME_DIR/.config" "$HOME_DIR/.s
 done
 desktop-start || echo "[entrypoint] desktop failed to start; carrying on without it" >&2
 
+# Claude Code is updated at boot rather than baked in: the image only rebuilds
+# when the Dockerfile changes, and a model pin once outran the baked version
+# (2.1.241, when claude-fable-5-1 needed 2.1.251), leaving every run failing
+# until someone noticed. The update installs into /home/agent/.local on the
+# volume, which PATH prefers over the image's copy (see the Dockerfile). Best
+# effort with a bound: no network is not a reason to stay down.
+echo "[entrypoint] claude update" >&2
+timeout 300 claude update \
+	|| echo "[entrypoint] claude update failed; carrying on with $(claude --version 2>/dev/null || echo 'unknown version')" >&2
+
 if [ ! -d "$REPO/.git" ] && [ -n "${AGENT_REPO:-}" ]; then
 	echo "[entrypoint] cloning $AGENT_REPO" >&2
 	git clone "$AGENT_REPO" "$REPO" || true
