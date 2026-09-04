@@ -1,0 +1,23 @@
+#!/bin/sh
+# A root shell on the agent's desktop, so Adam can type at the pod from the
+# noVNC page instead of reaching for kubectl exec.
+#
+# Unlike everything else on the display this runs as root: the point is to
+# reach the agent's own checkout, tools and cluster access. The trade-off is
+# that X11 has no per-client isolation, so any other client of the display —
+# Chromium runs on it as `desktop` — could in principle inject keystrokes into
+# this window. Accepted for a single-tenant pod behind the cluster's auth;
+# DESKTOP_TERMINAL=0 skips it at boot. Idempotent: one terminal at a time, and
+# rerunning after the shell was closed brings a fresh one up.
+set -u
+
+[ "${DESKTOP_TERMINAL:-1}" = 0 ] && exit 0
+pgrep -x xterm >/dev/null && exit 0
+
+cd /home/agent/src/personal-agent 2>/dev/null || cd /home/agent
+mkdir -p /tmp/desktop
+setsid -f env DISPLAY="${DESKTOP_DISPLAY:-:1}" HOME=/home/agent TERM=xterm-256color \
+	xterm -title 'agent shell (root)' -fa 'DejaVu Sans Mono' -fs 11 \
+	-bg '#0b0c0e' -fg '#d7dbe0' -geometry 120x34+24+24 -e bash -l \
+	>/tmp/desktop/xterm.log 2>&1
+echo "[desktop] root terminal started" >&2

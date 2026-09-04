@@ -39,4 +39,8 @@ pgrep -x x11vnc >/dev/null || as_desktop x11vnc -display "$DISPLAY_NUM" -forever
 # the ingress carries the auth.
 pgrep -f "websockify.*6080" >/dev/null || setsid -f websockify --web=/usr/share/novnc 6080 localhost:5900 >"$LOGS/websockify.log" 2>&1
 
+# A root shell for Adam on the same screen (its own script; see the trade-off
+# noted there). Optional: the display is fine without it.
+command -v xterm >/dev/null && { desktop-terminal || echo "[desktop] terminal failed to start" >&2; }
+
 echo "[desktop] display $DISPLAY_NUM up; noVNC on :6080; shared dir $SHARED" >&2

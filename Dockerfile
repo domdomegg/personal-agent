@@ -30,11 +30,13 @@ RUN curl -fsSLo /tmp/ss3.zip https://github.com/adobe-fonts/source-sans/releases
 # and keeps its own namespace sandbox (the pod allows unprivileged userns, so
 # no --no-sandbox); the agent's credentials live under /home/agent and a
 # browser must not be able to read them. See scripts/desktop/.
+# xterm (+ fonts, since the slim base ships none X can use) gives Adam a root
+# shell on that screen — see scripts/desktop/desktop-terminal for the trade-off.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	chromium novnc openbox scrot websockify x11vnc xdotool xvfb \
+	chromium fonts-dejavu-core novnc openbox scrot websockify x11vnc xdotool xfonts-base xterm xvfb \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --create-home --uid 1001 --shell /bin/bash desktop
-COPY scripts/desktop/desktop-start scripts/desktop/desktop-chromium /usr/local/bin/
+COPY scripts/desktop/desktop-start scripts/desktop/desktop-chromium scripts/desktop/desktop-terminal /usr/local/bin/
 ENV DISPLAY=:1
 
 # GitHub CLI, for the agent's own PRs.
