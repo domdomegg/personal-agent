@@ -24,9 +24,9 @@ RUN curl -fsSLo /tmp/ss3.zip https://github.com/adobe-fonts/source-sans/releases
 	&& rm -rf /tmp/ss3 /tmp/ss3.zip
 
 # A desktop the agent can drive and Adam can watch: a virtual X display (xvfb)
-# with a bare window manager, Chromium, the tools Bash uses to drive it
+# with a bare window manager, Google Chrome, the tools Bash uses to drive it
 # (xdotool, scrot), and x11vnc + noVNC so the screen is viewable in a browser
-# behind the cluster's auth. Chromium runs as the unprivileged `desktop` user
+# behind the cluster's auth. Chrome runs as the unprivileged `desktop` user
 # and keeps its own namespace sandbox (the pod allows unprivileged userns, so
 # no --no-sandbox); the agent's credentials live under /home/agent and a
 # browser must not be able to read them. See scripts/desktop/.
@@ -34,9 +34,17 @@ RUN curl -fsSLo /tmp/ss3.zip https://github.com/adobe-fonts/source-sans/releases
 # "Terminal emulator" entry (right-click the desktop) opens a shell there. It
 # runs as `desktop`, deliberately: for root, use kubectl exec.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	chromium fonts-dejavu-core novnc openbox scrot websockify x11vnc xdotool xfonts-base xterm xvfb \
+	fonts-dejavu-core novnc openbox scrot websockify x11vnc xdotool xfonts-base xterm xvfb \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --create-home --uid 1001 --shell /bin/bash desktop
+# Google Chrome rather than Debian's Chromium: Adam signs in to it for password
+# sync, which Chromium (built without Google's API keys) cannot do.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+		| gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+	&& echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+		> /etc/apt/sources.list.d/google-chrome.list \
+	&& apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+	&& rm -rf /var/lib/apt/lists/*
 COPY scripts/desktop/desktop-start scripts/desktop/desktop-chromium /usr/local/bin/
 ENV DISPLAY=:1
 
