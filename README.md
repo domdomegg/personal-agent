@@ -39,7 +39,10 @@ npm start
 ```
 
 Requires `claude` and [`call-mcp`](https://github.com/domdomegg/call-mcp) on
-`PATH`. Claude Code uses your existing OAuth login — no API key.
+`PATH`. Claude Code uses your existing OAuth login — no API key. For an
+unattended install, a browser login lapses after ~30 days regardless of use;
+run `claude setup-token` for a one-year token instead (in the container image,
+the entrypoint reads it from `~/.claude/oauth-token`).
 
 Channels are whatever MCP servers `call-mcp` can reach. This one runs against
 [`whatsapp-mcp-extended`](https://github.com/domdomegg/whatsapp-mcp-extended)
