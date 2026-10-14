@@ -48,7 +48,7 @@ export function connectPage(options: {podName: string; namespace: string; contai
   .button:hover { background: #21324f; }
   .dim { color: var(--dim); }
 </style>
-<header><h1>AGENT</h1><nav><a href="/">activity</a> <a href="/desktop" target="_blank">desktop</a> <a class="active" href="/connect">connect</a></nav></header>
+<header><h1>AGENT</h1><nav><a href="/">activity</a> <a href="/#chat">chat</a> <a href="/desktop" target="_blank">desktop</a> <a class="active" href="/connect">connect</a></nav></header>
 <main>
   <h2>Open this machine in VS Code</h2>
   <p>Files live in <code>/home/agent/src</code> in the pod
