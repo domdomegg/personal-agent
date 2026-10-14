@@ -131,3 +131,4 @@ undelivered-replies.jsonl
 CLAUDE.local.md
 # agent scratch space (memes, scripts); never part of the repo
 work/
+web-replies.jsonl
