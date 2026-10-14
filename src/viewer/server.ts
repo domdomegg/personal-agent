@@ -20,6 +20,7 @@ import {hostname} from 'node:os';
 import {readTranscript, readImage, type Entry} from './transcript.js';
 import {streamPage} from './stream.js';
 import {connectPage} from './connect.js';
+import type {WebChannel} from '../channels/web.js';
 
 export type ViewerOptions = {
 	transcriptPath: string;
@@ -30,6 +31,8 @@ export type ViewerOptions = {
 	 * instead of needing a second Service + Ingress. Default 6080.
 	 */
 	desktopPort?: number | undefined;
+	/** The message box. Omitted, the page is read-only. */
+	web?: Pick<WebChannel, 'receive' | 'noteSent'> | undefined;
 };
 
 export type Viewer = {
@@ -39,6 +42,50 @@ export type Viewer = {
 };
 
 const DESKTOP_PREFIX = '/desktop';
+
+/** Far beyond anything typed by hand; only here to bound memory. */
+const MAX_MESSAGE_BYTES = 64 * 1024;
+
+function isLoopback(request: IncomingMessage): boolean {
+	const address = request.socket.remoteAddress;
+	return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
+
+/**
+ * Reads a small JSON body and returns one string field from it, or an error
+ * message for the client.
+ *
+ * Insisting on a JSON content type doubles as CSRF protection: a cross-site
+ * form can only send form encodings or text/plain, and a cross-origin fetch
+ * with application/json needs a CORS preflight this server never approves.
+ */
+async function readField(request: IncomingMessage, field: string): Promise<{value: string} | {error: string}> {
+	if (!request.headers['content-type']?.startsWith('application/json')) {
+		return {error: 'content-type must be application/json'};
+	}
+
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of request) {
+		size += (chunk as Buffer).length;
+		if (size > MAX_MESSAGE_BYTES) {
+			return {error: 'message too large'};
+		}
+
+		chunks.push(chunk as Buffer);
+	}
+
+	try {
+		const value = (JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)[field];
+		if (typeof value !== 'string' || value.trim() === '') {
+			return {error: `${field} must be a non-empty string`};
+		}
+
+		return {value};
+	} catch {
+		return {error: 'body is not valid JSON'};
+	}
+}
 
 /**
  * Plain HTTP pass-through for noVNC's static files. The prefix is stripped so
@@ -147,6 +194,49 @@ export function startViewer(options: ViewerOptions): Viewer {
 			response.end(body);
 		};
 
+		// Owner typing into the page. Behind the ingress auth like the rest of
+		// the viewer (see channels/web.ts for why that is the owner check).
+		if (url.pathname === '/api/message' && options.web) {
+			const {web} = options;
+			if (request.method !== 'POST') {
+				send(405, 'text/plain', 'POST only');
+				return;
+			}
+
+			void readField(request, 'text').then((result) => {
+				if ('error' in result) {
+					send(400, 'application/json', JSON.stringify(result));
+					return;
+				}
+
+				send(200, 'application/json', JSON.stringify({id: web.receive(result.value)}));
+			});
+			return;
+		}
+
+		// The agent replying. Loopback only: arriving through the ingress, this
+		// would let a viewer forge the agent's side of the conversation. The
+		// path keeps "send_message" so the transcript shows the curl as a reply,
+		// and the response carries "success":true for the same reason.
+		if (url.pathname === '/api/send_message' && options.web) {
+			const {web} = options;
+			if (request.method !== 'POST' || !isLoopback(request)) {
+				send(403, 'text/plain', 'loopback POST only: this is how the agent replies');
+				return;
+			}
+
+			void readField(request, 'message').then((result) => {
+				if ('error' in result) {
+					send(400, 'application/json', JSON.stringify(result));
+					return;
+				}
+
+				web.noteSent();
+				send(200, 'application/json', JSON.stringify({success: true, message_id: `web-reply-${Date.now()}`}));
+			});
+			return;
+		}
+
 		if (url.pathname === '/api/version') {
 			send(200, 'application/json', JSON.stringify({version, changedAt}));
 			return;
@@ -211,7 +301,7 @@ export function startViewer(options: ViewerOptions): Viewer {
 
 		// /stream kept as an alias so existing tabs and bookmarks still work.
 		if (url.pathname === '/' || url.pathname === '/stream') {
-			send(200, 'text/html; charset=utf-8', streamPage());
+			send(200, 'text/html; charset=utf-8', streamPage({chat: options.web !== undefined}));
 			return;
 		}
 

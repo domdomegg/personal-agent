@@ -5,8 +5,20 @@
  *
  * The kind filters double as the old conversation view — adam + reply alone is
  * the delivered conversation — which is why that second page was dropped.
+ *
+ * With `chat`, a message box sits at the bottom: what is typed there reaches
+ * the agent as a web-channel event, and its replies show up as reply rows like
+ * any other. The "chat" view hides the working-out so the conversation reads
+ * on its own.
  */
-export function streamPage(): string {
+const COMPOSER = `<span id="composerNote"></span>
+<form id="composer">
+  <textarea id="message" rows="1" placeholder="message the agent" aria-label="message the agent"></textarea>
+  <button type="submit" id="sendButton">send</button>
+</form>`;
+
+export function streamPage(options: {chat?: boolean} = {}): string {
+	const chat = options.chat ?? false;
 	return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -95,10 +107,36 @@ export function streamPage(): string {
   .diff .del { background: var(--del); color: var(--del-text); }
   .diff .add { background: var(--add); color: var(--add-text); }
   .empty { color: var(--dim); text-align: center; padding: 48px 0; }
+
+  /* Chat view: only the conversation. */
+  .chat-only .row.tool, .chat-only .row.notes { display: none; }
+
+  /* Message box, pinned to the bottom. */
+  .has-composer main { padding-bottom: 140px; }
+  .has-composer #jump { bottom: 96px; }
+  #composer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
+    background: rgba(11,12,14,.96); border-top: 1px solid var(--line);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    display: flex; gap: 8px; align-items: flex-end;
+  }
+  #composer textarea {
+    flex: 1; min-width: 0; resize: none; max-height: 40vh;
+    background: #101318; color: var(--text); border: 1px solid #39404a; border-radius: 6px;
+    padding: 8px 10px; font: inherit; font-size: 16px; /* 16px stops iOS zooming on focus */
+  }
+  #composer textarea:focus { outline: none; border-color: var(--in); }
+  #composer button {
+    flex: none; background: #1f2a1a; color: var(--reply); border: 1px solid #3a4f2e;
+    border-radius: 6px; padding: 8px 14px; font: inherit; cursor: pointer;
+  }
+  #composer button:disabled { opacity: .5; cursor: default; }
+  #composerNote { position: fixed; left: 14px; bottom: 64px; z-index: 2; color: var(--dim); font-size: 12px; }
+  #composerNote.err { color: var(--err); }
 </style>
 <header>
   <h1>AGENT</h1>
-  <nav><a class="active" href="/">activity</a> <a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
+  <nav><a id="navActivity" class="active" href="/">activity</a>${chat ? ' <a id="navChat" href="/#chat">chat</a>' : ''} <a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
   <span class="status">
     <!-- Clawd, measured off the official sticker art (run-length analysis of
          the pixel grid): 12x8 units — 8x6 body, eyes 1 in from each edge on
@@ -139,7 +177,9 @@ export function streamPage(): string {
 </header>
 <main id="root"><div class="empty">loading…</div></main>
 <button id="jump">↓ latest<span class="n" id="jumpCount"></span></button>
+${chat ? COMPOSER : ''}
 <script>
+const CHAT = ${chat ? 'true' : 'false'};
 const root = document.getElementById('root');
 const statusEl = document.getElementById('status');
 const jump = document.getElementById('jump');
@@ -322,9 +362,24 @@ function render(entries) {
   root.replaceChildren(frag);
 }
 
-function setState(state) {
-  document.body.className = 'st-' + state;
-  statusEl.textContent = state;
+// Body classes: state from the poll loop, view from the URL hash, composer
+// from whether this viewer has one. Rebuilt whole so none clobbers another.
+let state = 'idle';
+function syncBodyClass() {
+  const chatView = CHAT && location.hash === '#chat';
+  document.body.className = 'st-' + state + (chatView ? ' chat-only' : '') + (CHAT ? ' has-composer' : '');
+  const nav = document.getElementById('navChat');
+  if (nav) {
+    nav.classList.toggle('active', chatView);
+    document.getElementById('navActivity').classList.toggle('active', !chatView);
+  }
+}
+window.addEventListener('hashchange', () => { syncBodyClass(); window.scrollTo(0, document.body.scrollHeight); });
+
+function setState(next) {
+  state = next;
+  syncBodyClass();
+  statusEl.textContent = next;
 }
 
 function computeState() {
@@ -364,6 +419,53 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
+if (CHAT) {
+  const form = document.getElementById('composer');
+  const box = document.getElementById('message');
+  const button = document.getElementById('sendButton');
+  const note = document.getElementById('composerNote');
+
+  const grow = () => { box.style.height = 'auto'; box.style.height = box.scrollHeight + 'px'; };
+  box.addEventListener('input', grow);
+  // Enter sends, shift+enter is a newline — except on touch keyboards, where
+  // there is no shift and the send button is right there.
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer: coarse)').matches) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = box.value;
+    if (!text.trim()) return;
+    button.disabled = true;
+    note.className = '';
+    try {
+      const r = await fetch('/api/message', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({text}),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
+      box.value = '';
+      grow();
+      // The message shows as an adam row once the agent takes it, usually
+      // within a couple of seconds.
+      note.textContent = 'sent — waiting for the agent to pick it up';
+      setTimeout(() => { if (note.textContent.startsWith('sent')) note.textContent = ''; }, 8000);
+    } catch (err) {
+      note.className = 'err';
+      note.textContent = 'not sent: ' + err.message;
+    } finally {
+      button.disabled = false;
+      box.focus();
+    }
+  });
+}
+
+syncBodyClass();
 refresh().then(() => window.scrollTo(0, document.body.scrollHeight));
 poll();
 </script>
