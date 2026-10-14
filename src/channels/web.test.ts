@@ -38,6 +38,14 @@ test('noteSent keeps the reply text under the id it returns, so the viewer need 
 	expect(web.replyText('web-reply-unknown')).toBeUndefined();
 });
 
+test('recent lists what was received, oldest first, for the viewer\'s pending rows', () => {
+	const web = createWebChannel();
+	web.receive('first');
+	web.receive('second');
+	expect(web.recent().map((m) => m.text)).toEqual(['first', 'second']);
+	expect(web.recent()[0]?.at).toMatch(/^\d{4}-/);
+});
+
 test('reply texts persist across a restart when a store path is given', () => {
 	const storePath = join(mkdtempSync(join(tmpdir(), 'web-test-')), 'web-replies.jsonl');
 	const id = createWebChannel({storePath}).noteSent('remember me');

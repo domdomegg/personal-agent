@@ -87,6 +87,8 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   .row.notes .body { color: var(--dim); }
   .row.running { background: #12180f; }
   .row.queued { background: #17140d; }
+  .row.pending { opacity: .6; }
+  .row.pending .tag::after { content: ' ⏳'; }
   .waiting { color: var(--reply); animation: blink 1.4s ease-in-out infinite; }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   .row.tool .body b { font-weight: 600; color: var(--text); }
@@ -254,7 +256,7 @@ function render(entries) {
 
   entries.forEach((e, i) => {
     const row = document.createElement('div');
-    row.className = 'row ' + e.kind + (e.failed ? ' failed' : '') + (e.queued ? ' queued' : '');
+    row.className = 'row ' + e.kind + (e.failed ? ' failed' : '') + (e.queued ? ' queued' : '') + (e.pending ? ' pending' : '');
 
     const t = document.createElement('span');
     t.className = 't';
@@ -268,6 +270,7 @@ function render(entries) {
       : e.kind === 'reply' ? (e.failed ? 'undeliv' : 'reply')
       : e.kind === 'tool' ? (e.failed ? 'error' : 'tool') : e.kind;
     if (e.queued) tag.title = 'sent while a turn was already running';
+    if (e.pending) tag.title = 'delivered; the agent sees it when its current step finishes';
     if (e.kind === 'reply' && e.failed) tag.title = 'send failed — Adam did not get this';
 
     const body = document.createElement('span');
@@ -455,7 +458,7 @@ if (CHAT) {
       grow();
       // The message shows as an adam row once the agent takes it, usually
       // within a couple of seconds.
-      note.textContent = 'sent — waiting for the agent to pick it up';
+      note.textContent = 'sent — the agent sees it when its current step finishes';
       setTimeout(() => { if (note.textContent.startsWith('sent')) note.textContent = ''; }, 8000);
     } catch (err) {
       note.className = 'err';

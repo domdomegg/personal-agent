@@ -28,6 +28,12 @@ export type RunnerOptions = {
 	 */
 	lingerMs?: number | undefined;
 	/**
+	 * How long after a turn ends the reply-check (and any requested compaction)
+	 * runs, in ms. Defaults to the lesser of 1.5s and `lingerMs`, so a long
+	 * linger does not also delay the nudge about an unanswered message.
+	 */
+	replyCheckMs?: number | undefined;
+	/**
 	 * Set when the session id already exists from an earlier process, so the
 	 * first run resumes rather than trying to create it.
 	 */
@@ -322,6 +328,7 @@ export class Runner {
 		// afterwards so a message arriving moments later still joins this run,
 		// then close stdin to let it shut down.
 		const linger = this.options.lingerMs ?? 1500;
+		const replyCheck = Math.min(this.options.replyCheckMs ?? 1500, linger);
 		let settleTurn: (() => void) | undefined;
 		const turnFinished = new Promise<void>((resolve) => {
 			settleTurn = resolve;
@@ -370,9 +377,26 @@ export class Runner {
 		const markIdle = (): void => {
 			idleEpoch += 1;
 			const epoch = idleEpoch;
+			const idleSince = Date.now();
 			if (idleTimer) {
 				clearTimeout(idleTimer);
 			}
+
+			// Two stages on one countdown: the checks below run soon after the
+			// turn, then the run stays open (stdin held) until the linger is up.
+			const windDown = (): void => {
+				if (epoch !== idleEpoch) {
+					return;
+				}
+
+				// The quiet period has passed with no event joining, so the run
+				// winds down. stdin closes here — in the same tick the flag flips —
+				// so a submit() racing this callback either cancelled the timer
+				// first or sees `accepting` false and queues for the next run.
+				this.accepting = false;
+				child.stdin.end();
+				settleTurn?.();
+			};
 
 			idleTimer = setTimeout(() => {
 				if (epoch !== idleEpoch) {
@@ -444,14 +468,14 @@ export class Runner {
 					return;
 				}
 
-				// The quiet period has passed with no event joining, so the run
-				// winds down. stdin closes here — in the same tick the flag flips —
-				// so a submit() racing this callback either cancelled the timer
-				// first or sees `accepting` false and queues for the next run.
-				this.accepting = false;
-				child.stdin.end();
-				settleTurn?.();
-			}, linger);
+				const remaining = linger - (Date.now() - idleSince);
+				if (remaining > 0) {
+					idleTimer = setTimeout(windDown, remaining);
+					return;
+				}
+
+				windDown();
+			}, replyCheck);
 		};
 
 		// An event joining the run cancels the countdown: the turn is live again,

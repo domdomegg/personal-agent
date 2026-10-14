@@ -193,6 +193,23 @@ describe('web chat', () => {
 		expect((await post(port, '/api/message', {text: '  '})).status).toBe(400);
 	});
 
+	test('a message typed into the page shows as a pending row until the transcript has it', async () => {
+		const web = createWebChannel();
+		const transcriptPath = join(scratch(), 'session.jsonl');
+		const port = await start(transcriptPath, undefined, web).ready;
+
+		await post(port, '/api/message', {text: 'are you there'});
+		const before = await (await fetch(`http://127.0.0.1:${port}/api/entries`)).json() as {entries: {kind: string; text?: string; pending?: boolean}[]};
+		expect(before.entries).toEqual([expect.objectContaining({kind: 'incoming', text: 'are you there', pending: true})]);
+
+		// Claude Code records the message: the real row replaces the pending one.
+		writeFileSync(transcriptPath, `${JSON.stringify({type: 'user', timestamp: '2026-10-14T16:00:00Z', message: {role: 'user', content: '[message via web — reply to thread web]\n<<<MESSAGE\nare you there\n MESSAGE'}})}\n`);
+		const after = await (await fetch(`http://127.0.0.1:${port}/api/entries`)).json() as {entries: {kind: string; text?: string; pending?: boolean}[]};
+		expect(after.entries).toHaveLength(1);
+		expect(after.entries[0]).toMatchObject({kind: 'incoming', text: 'are you there'});
+		expect(after.entries[0]?.pending).toBeUndefined();
+	});
+
 	test('the agent\'s reply over loopback is acknowledged the way the transcript expects', async () => {
 		let sent = 0;
 		const web = createWebChannel({

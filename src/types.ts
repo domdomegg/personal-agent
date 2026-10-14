@@ -196,4 +196,15 @@ export type Config = {
 		enabled: boolean;
 		port: number;
 	};
+
+	runner: {
+		/**
+		 * How long Claude Code is kept alive after a turn ends, in ms. A message
+		 * arriving within this window joins the live process; after it, the
+		 * next message pays for a fresh `claude --resume` of the whole session
+		 * (~8s on a 66 MB transcript, 2026-10-14). The reply-check and compaction
+		 * still run 1.5s after the turn, independently of this.
+		 */
+		lingerMs: number;
+	};
 };

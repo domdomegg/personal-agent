@@ -30,7 +30,12 @@ export type WebChannel = Channel & {
 	noteSent: (message: string) => string;
 	/** The text of an earlier reply, by the id `noteSent` returned; undefined if unknown. */
 	replyText: (id: string) => string | undefined;
+	/** Messages received recently, oldest first, for showing them before the transcript has them. */
+	recent: () => {id: string; text: string; at: string}[];
 };
+
+/** How many received messages are remembered for the pending view. */
+const RECENT_LIMIT = 50;
 
 export type WebOptions = {
 	onSent?: (() => void) | undefined;
@@ -70,6 +75,7 @@ export function createWebChannel(options: WebOptions = {}): WebChannel {
 	// POST that queued it fails outright if the process is down.
 	let pending: AgentEvent[] = [];
 	const replies = loadReplies(options.storePath);
+	const received: {id: string; text: string; at: string}[] = [];
 
 	return {
 		id: WEB_CHANNEL_ID,
@@ -82,13 +88,19 @@ export function createWebChannel(options: WebOptions = {}): WebChannel {
 
 		receive(text) {
 			const id = `web-${randomUUID()}`;
+			const timestamp = new Date();
 			pending.push({
 				id,
 				channel: WEB_CHANNEL_ID,
 				threadId: WEB_THREAD_ID,
 				text,
-				timestamp: new Date(),
+				timestamp,
 			});
+			received.push({id, text, at: timestamp.toISOString()});
+			if (received.length > RECENT_LIMIT) {
+				received.shift();
+			}
+
 			return id;
 		},
 
@@ -114,6 +126,10 @@ export function createWebChannel(options: WebOptions = {}): WebChannel {
 
 		replyText(id) {
 			return replies.get(id);
+		},
+
+		recent() {
+			return [...received];
 		},
 
 		// The page shows replies by reading the transcript, so a send made by the

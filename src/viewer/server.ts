@@ -32,7 +32,7 @@ export type ViewerOptions = {
 	 */
 	desktopPort?: number | undefined;
 	/** The message box. Omitted, the page is read-only. */
-	web?: Pick<WebChannel, 'receive' | 'noteSent' | 'replyText'> | undefined;
+	web?: Pick<WebChannel, 'receive' | 'noteSent' | 'replyText' | 'recent'> | undefined;
 };
 
 export type Viewer = {
@@ -138,6 +138,23 @@ function proxyDesktopUpgrade(request: IncomingMessage, socket: Socket, head: Buf
 	});
 	upstream.on('error', () => socket.destroy());
 	socket.on('error', () => upstream.destroy());
+}
+
+/**
+ * A message typed into the page is handed to the agent within a second, but
+ * Claude Code only surfaces it at its next tool-result boundary — behind
+ * whatever thinking and command are in flight, sometimes tens of seconds.
+ * Until the transcript has it, show it as a pending row so the wait is
+ * visible rather than silent. Matched by text once the transcript catches up.
+ */
+export function withPending(entries: Entry[], recent: {text: string; at: string}[]): Entry[] {
+	const seen = new Set(entries.filter((e) => e.kind === 'incoming').map((e) => e.text));
+	const pending = recent
+		.filter((m) => !seen.has(m.text))
+		.map((m): Entry => ({
+			kind: 'incoming', at: m.at, text: m.text, queued: true, pending: true,
+		}));
+	return pending.length > 0 ? [...entries, ...pending] : entries;
 }
 
 export function startViewer(options: ViewerOptions): Viewer {
@@ -272,13 +289,13 @@ export function startViewer(options: ViewerOptions): Viewer {
 			// Before the first turn there is nothing to read; an empty transcript
 			// is the honest answer, not a 500.
 			if (!existsSync(options.transcriptPath)) {
-				send(200, 'application/json', JSON.stringify({version, entries: []}));
+				send(200, 'application/json', JSON.stringify({version, entries: withPending([], options.web?.recent() ?? [])}));
 				return;
 			}
 
 			readTranscript(options.transcriptPath, {replyText: options.web?.replyText})
 				.then((entries) => {
-					send(200, 'application/json', JSON.stringify({version, entries}));
+					send(200, 'application/json', JSON.stringify({version, entries: withPending(entries, options.web?.recent() ?? [])}));
 				})
 				.catch((error: unknown) => {
 					send(500, 'application/json', JSON.stringify({error: String(error)}));

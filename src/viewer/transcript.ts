@@ -29,7 +29,7 @@ export type ImageRef = {id: string; direction: 'in' | 'out'};
 
 export type Entry =
 	/** `queued` marks a message that arrived while a turn was already running. */
-	| {kind: 'incoming'; at: string; text: string; queued?: boolean}
+	| {kind: 'incoming'; at: string; text: string; queued?: boolean; pending?: boolean}
 	/**
 	 * A delivered outgoing message. Modern transcripts: a send_message tool
 	 * call, recognised by its command and upgraded to a reply row (failed =

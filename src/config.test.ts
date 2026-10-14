@@ -68,6 +68,16 @@ describe('config loading', () => {
 	});
 });
 
+describe('runner', () => {
+	test('lingerMs defaults to two minutes and can be overridden', () => {
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc'});
+		expect(loadConfig(configPath).config.runner.lingerMs).toBe(120_000);
+
+		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc', runner: {lingerMs: 500}});
+		expect(loadConfig(configPath).config.runner.lingerMs).toBe(500);
+	});
+});
+
 describe('mcpServer', () => {
 	test('is passed through when set', () => {
 		writeConfig(configPath, {...defaultConfig(), sessionId: 'abc', mcpServer: 'homelab'});

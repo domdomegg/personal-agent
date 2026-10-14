@@ -107,7 +107,7 @@ export function createAgent(options: AgentOptions): Agent {
 		fallbackModel: config.fallbackModel,
 		workingDirectory: config.workingDirectory,
 		claudePath: options.claudePath,
-		lingerMs: options.lingerMs,
+		lingerMs: options.lingerMs ?? config.runner.lingerMs,
 		sessionExists: options.sessionExists ?? existsSync(sessionMarker),
 		// Recorded only once a run has actually created the session. Writing it
 		// at startup meant the first real run tried to --resume a session that

@@ -41,6 +41,9 @@ export function defaultConfig(): Config {
 			enabled: true,
 			port: 4317,
 		},
+		runner: {
+			lingerMs: 120_000,
+		},
 	};
 }
 
@@ -104,6 +107,7 @@ function parse(raw: string): Config {
 		mcpServer: typeof parsed.mcpServer === 'string' && parsed.mcpServer.trim() !== '' ? parsed.mcpServer : undefined,
 		polling: {...base.polling, ...parsed.polling},
 		viewer: {...base.viewer, ...parsed.viewer},
+		runner: {...base.runner, ...parsed.runner},
 	};
 }
 
