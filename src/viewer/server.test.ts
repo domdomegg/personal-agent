@@ -204,7 +204,9 @@ describe('web chat', () => {
 
 		const response = await post(port, '/api/send_message', {message: 'hello adam'});
 		expect(response.status).toBe(200);
-		expect(await response.text()).toContain('"success":true');
+		const body = await response.json() as {success: boolean; message_id: string};
+		expect(body.success).toBe(true);
+		expect(web.replyText(body.message_id)).toBe('hello adam');
 		expect(sent).toBe(1);
 	});
 

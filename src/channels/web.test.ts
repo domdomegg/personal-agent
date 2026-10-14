@@ -1,4 +1,7 @@
 import {test, expect, vi} from 'vitest';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {createWebChannel, WEB_CHANNEL_ID, WEB_THREAD_ID} from './web.js';
 
 test('a received message comes out of the next poll, once', async () => {
@@ -23,8 +26,23 @@ test('every message gets its own id, so the dispatcher never drops one as a dupl
 
 test('noteSent reports the reply so the runner\'s reply-check stands down', () => {
 	const onSent = vi.fn();
-	createWebChannel({onSent}).noteSent();
+	createWebChannel({onSent}).noteSent('hi');
 	expect(onSent).toHaveBeenCalledOnce();
+});
+
+test('noteSent keeps the reply text under the id it returns, so the viewer need not parse the shell', () => {
+	const web = createWebChannel();
+	const id = web.noteSent('it\'s "quoted" & odd');
+	expect(id).toMatch(/^web-reply-/);
+	expect(web.replyText(id)).toBe('it\'s "quoted" & odd');
+	expect(web.replyText('web-reply-unknown')).toBeUndefined();
+});
+
+test('reply texts persist across a restart when a store path is given', () => {
+	const storePath = join(mkdtempSync(join(tmpdir(), 'web-test-')), 'web-replies.jsonl');
+	const id = createWebChannel({storePath}).noteSent('remember me');
+
+	expect(createWebChannel({storePath}).replyText(id)).toBe('remember me');
 });
 
 test('a harness-side send fails loudly rather than vanishing', async () => {

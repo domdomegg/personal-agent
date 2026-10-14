@@ -32,7 +32,7 @@ export type ViewerOptions = {
 	 */
 	desktopPort?: number | undefined;
 	/** The message box. Omitted, the page is read-only. */
-	web?: Pick<WebChannel, 'receive' | 'noteSent'> | undefined;
+	web?: Pick<WebChannel, 'receive' | 'noteSent' | 'replyText'> | undefined;
 };
 
 export type Viewer = {
@@ -231,8 +231,8 @@ export function startViewer(options: ViewerOptions): Viewer {
 					return;
 				}
 
-				web.noteSent();
-				send(200, 'application/json', JSON.stringify({success: true, message_id: `web-reply-${Date.now()}`}));
+				const id = web.noteSent(result.value);
+				send(200, 'application/json', JSON.stringify({success: true, message_id: id}));
 			});
 			return;
 		}
@@ -276,7 +276,7 @@ export function startViewer(options: ViewerOptions): Viewer {
 				return;
 			}
 
-			readTranscript(options.transcriptPath)
+			readTranscript(options.transcriptPath, {replyText: options.web?.replyText})
 				.then((entries) => {
 					send(200, 'application/json', JSON.stringify({version, entries}));
 				})

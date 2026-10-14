@@ -77,7 +77,19 @@ type Raw = {
 	};
 };
 
-export async function readTranscript(path: string): Promise<Entry[]> {
+export type TranscriptOptions = {
+	/**
+	 * Text of a web reply by the id in the send's result. The curl's command
+	 * line may build its JSON in a subshell or with shell escapes the
+	 * command-line parser cannot follow; the result's id is unambiguous.
+	 */
+	replyText?: ((id: string) => string | undefined) | undefined;
+};
+
+/** The viewer answers every web reply with this id; the transcript result carries it. */
+const WEB_REPLY_ID = /"message_id":"(web-reply-[^"]+)"/;
+
+export async function readTranscript(path: string, options: TranscriptOptions = {}): Promise<Entry[]> {
 	const entries: Entry[] = [];
 	// Tool results arrive in a later user message than the call, so calls are
 	// indexed by id and back-filled when the result shows up. Sends are indexed
@@ -133,7 +145,7 @@ export async function readTranscript(path: string): Promise<Entry[]> {
 					? toolsById.get(block.tool_use_id)
 					: undefined;
 				if (call) {
-					applyResult(call, block);
+					applyResult(call, block, options.replyText);
 				}
 			}
 
@@ -227,14 +239,16 @@ export function extractSend(input: unknown): string | undefined {
 		return undefined;
 	}
 
-	// The command may chain other things; only the JSON payload matters.
-	const args = /--(?:args|json)\s+'(\{[\s\S]*?\})'/.exec(command);
-	if (!args?.[1]) {
+	// The command may chain other things; only the JSON payload matters. An
+	// apostrophe inside a single-quoted shell string is written '"'"' or '\'';
+	// allow those, then fold them back before parsing.
+	const args = /--(?:args|json)\s+'((?:'"'"'|'\\''|[^'])*)'/.exec(command);
+	if (!args?.[1]?.startsWith('{')) {
 		return undefined;
 	}
 
 	try {
-		const parsed = JSON.parse(args[1]) as {message?: unknown};
+		const parsed = JSON.parse(args[1].replaceAll('\'"\'"\'', '\'').replaceAll('\'\\\'\'', '\'')) as {message?: unknown};
 		return typeof parsed.message === 'string' ? parsed.message : undefined;
 	} catch {
 		// Unparseable payload (e.g. awkward shell quoting): leave it a tool row.
@@ -343,7 +357,29 @@ export function imageMediaType(base64: string): string | undefined {
 }
 
 /** Back-fill a tool call (or reply row) with its result when that arrives. */
-function applyResult(call: Entry & {kind: 'tool' | 'reply'}, result: Block): void {
+/**
+ * A Bash call whose result carries a web-reply id was the agent replying on
+ * the web channel, however its command line was quoted. Rewrite the row as a
+ * reply, with the text the viewer recorded when it was sent; if that is gone
+ * (older than the store), fall back to whatever the command line yields.
+ */
+function upgradeWebReply(call: Entry & {kind: 'tool'}, replyText: TranscriptOptions['replyText']): void {
+	const id = call.result === undefined ? undefined : WEB_REPLY_ID.exec(call.result)?.[1];
+	if (!id) {
+		return;
+	}
+
+	const text = replyText?.(id) ?? extractSend({command: call.input}) ?? '(web reply — text not recorded)';
+	const failed = call.failed === true || !call.result?.includes('"success":true');
+	const upgraded = call as Partial<Entry & {kind: 'tool'}>;
+	delete upgraded.name;
+	delete upgraded.input;
+	delete upgraded.detail;
+	delete upgraded.images;
+	Object.assign(upgraded, {kind: 'reply', text, failed});
+}
+
+function applyResult(call: Entry & {kind: 'tool' | 'reply'}, result: Block, replyText?: TranscriptOptions['replyText']): void {
 	call.result = flatten(result.content).slice(0, 4000);
 	// For a reply row, "failed" means undelivered: the send tool reports
 	// {"success":true,...} on stdout only when it went through.
@@ -357,6 +393,8 @@ function applyResult(call: Entry & {kind: 'tool' | 'reply'}, result: Block): voi
 		if (out.length > 0) {
 			call.images = [...(call.images ?? []), ...out];
 		}
+
+		upgradeWebReply(call, replyText);
 	}
 }
 

@@ -373,6 +373,8 @@ function syncBodyClass() {
     nav.classList.toggle('active', chatView);
     document.getElementById('navActivity').classList.toggle('active', !chatView);
   }
+  // Arriving on the chat view is for typing: put the caret in the box.
+  if (chatView) document.getElementById('message')?.focus();
 }
 window.addEventListener('hashchange', () => { syncBodyClass(); window.scrollTo(0, document.body.scrollHeight); });
 

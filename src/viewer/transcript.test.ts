@@ -46,6 +46,29 @@ test('extractSend recognises a web reply, sent with curl', () => {
 	expect(extractSend({command})).toBe('hi from the web');
 });
 
+test('extractSend follows the shell\'s own apostrophe escapes inside the payload', () => {
+	const command = 'call-mcp call homelab whatsapp-claube__send_message --args \'{"recipient": "x", "message": "that\'"\'"\'s it, isn\'\\\'\'t it"}\'';
+	expect(extractSend({command})).toBe('that\'s it, isn\'t it');
+});
+
+test('a web reply whose JSON was built in a subshell is still a reply row, by the id in its result', async () => {
+	const command = 'curl -sS localhost:4317/api/send_message --json "$(python3 -c \'import json; print(json.dumps({"message": "built"}))\')"';
+	const path = write([
+		toolUse('t1', 'Bash', {command}),
+		toolResult('t1', '{"success":true,"message_id":"web-reply-1700000000000-abcd1234"}'),
+	]);
+
+	const stored = new Map([['web-reply-1700000000000-abcd1234', 'the text as sent']]);
+	const entries = await readTranscript(path, {replyText: (id) => stored.get(id)});
+	expect(entries).toEqual([expect.objectContaining({kind: 'reply', text: 'the text as sent', failed: false})]);
+	expect(entries[0]).not.toHaveProperty('name');
+
+	// Without the store (older than it, or a restart before it existed) the row
+	// is still a reply, just without its words.
+	const bare = await readTranscript(path);
+	expect(bare[0]).toMatchObject({kind: 'reply', text: '(web reply — text not recorded)'});
+});
+
 test('a web message, which has no sender line, shows just its body', async () => {
 	const path = write([{
 		type: 'user',

@@ -5,6 +5,7 @@
  * capabilities, and this is only the push path that wakes them.
  */
 import {existsSync, writeFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
 import type {Channel, Config} from './types.js';
 import {Runner} from './runner.js';
 import {Dispatcher} from './dispatcher.js';
@@ -92,6 +93,8 @@ export function createAgent(options: AgentOptions): Agent {
 			onSent() {
 				holder.runner?.noteReplySent(WEB_CHANNEL_ID, WEB_THREAD_ID);
 			},
+			// Reply texts live next to the dispatcher's state so they survive restarts.
+			storePath: join(dirname(options.statePath), 'web-replies.jsonl'),
 		})
 		: undefined;
 	if (web) {
