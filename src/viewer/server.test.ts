@@ -6,7 +6,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer, type Server} from 'node:http';
 import {connect} from 'node:net';
+import {networkInterfaces} from 'node:os';
 import {startViewer} from './server.js';
+import {createWebChannel} from '../channels/web.js';
 
 // A fresh session has no transcript, and often no projects/ directory either:
 // Claude Code writes both on the first turn. The viewer used to watch the file
@@ -15,9 +17,11 @@ import {startViewer} from './server.js';
 const viewers: {close: () => void}[] = [];
 const directories: string[] = [];
 
-function start(transcriptPath: string, desktopPort?: number): ReturnType<typeof startViewer> {
+function start(transcriptPath: string, desktopPort?: number, web?: Parameters<typeof startViewer>[0]['web']): ReturnType<typeof startViewer> {
 	// Port 0 lets the OS pick a free one, so tests never clash.
-	const viewer = startViewer({transcriptPath, port: 0, desktopPort});
+	const viewer = startViewer({
+		transcriptPath, port: 0, desktopPort, web,
+	});
 	viewers.push(viewer);
 	return viewer;
 }
@@ -152,5 +156,88 @@ describe('desktop proxy', () => {
 		const response = await fetch(`http://127.0.0.1:${port}/desktop/vnc.html`);
 		expect(response.status).toBe(502);
 		expect(await response.text()).toContain('desktop is not running');
+	});
+});
+
+describe('web chat', () => {
+	const post = async (port: number, path: string, body: unknown, host = '127.0.0.1', contentType = 'application/json'): Promise<Response> => fetch(`http://${host}:${port}${path}`, {
+		method: 'POST',
+		headers: {'content-type': contentType},
+		body: JSON.stringify(body),
+	});
+
+	test('a message posted from the page reaches the channel', async () => {
+		const web = createWebChannel();
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, web).ready;
+
+		const response = await post(port, '/api/message', {text: 'hi there'});
+		expect(response.status).toBe(200);
+		const {id} = await response.json() as {id: string};
+
+		expect(await web.poll()).toEqual([expect.objectContaining({id, text: 'hi there'})]);
+	});
+
+	test('refuses non-JSON posts, which is what keeps cross-site forms out', async () => {
+		const web = createWebChannel();
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, web).ready;
+
+		const response = await post(port, '/api/message', {text: 'hi'}, '127.0.0.1', 'text/plain');
+		expect(response.status).toBe(400);
+		expect(await web.poll()).toEqual([]);
+	});
+
+	test('refuses an empty message', async () => {
+		const web = createWebChannel();
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, web).ready;
+
+		expect((await post(port, '/api/message', {text: '  '})).status).toBe(400);
+	});
+
+	test('the agent\'s reply over loopback is acknowledged the way the transcript expects', async () => {
+		let sent = 0;
+		const web = createWebChannel({
+			onSent() {
+				sent += 1;
+			},
+		});
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, web).ready;
+
+		const response = await post(port, '/api/send_message', {message: 'hello adam'});
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain('"success":true');
+		expect(sent).toBe(1);
+	});
+
+	test('a reply arriving from off the box is refused: viewers cannot speak as the agent', async () => {
+		const external = Object.values(networkInterfaces()).flat()
+			.find((i) => i?.family === 'IPv4' && !i.internal)?.address;
+		if (!external) {
+			return;
+		}
+
+		let sent = 0;
+		const web = createWebChannel({
+			onSent() {
+				sent += 1;
+			},
+		});
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, web).ready;
+
+		const response = await post(port, '/api/send_message', {message: 'forged'}, external);
+		expect(response.status).toBe(403);
+		expect(sent).toBe(0);
+	});
+
+	test('without a web channel the page has no message box and the endpoints do not exist', async () => {
+		const port = await start(join(scratch(), 'session.jsonl')).ready;
+
+		expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).not.toContain('id="composer"');
+		expect((await post(port, '/api/message', {text: 'hi'})).status).toBe(404);
+	});
+
+	test('with one, the page has the message box', async () => {
+		const port = await start(join(scratch(), 'session.jsonl'), undefined, createWebChannel()).ready;
+
+		expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toContain('id="composer"');
 	});
 });

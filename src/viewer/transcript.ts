@@ -58,7 +58,7 @@ export type Entry =
 const REPLY_MARKER = /^>>> reply channel=\S+ thread=\S+[ \t]*\n?/m;
 
 /** Inbound messages arrive wrapped in a routing envelope; show just the body. */
-const ENVELOPE = /^\[message via [^\]]+]\nfrom: \S+\n<<<MESSAGE\n([\s\S]*?)\n\s*MESSAGE\s*$/;
+const ENVELOPE = /^\[message via [^\]]+](?:\nfrom: \S+)?\n<<<MESSAGE\n([\s\S]*?)\n\s*MESSAGE\s*$/;
 
 function unwrap(text: string): string {
 	return ENVELOPE.exec(text)?.[1]?.trim() ?? text.trim();
@@ -212,8 +212,9 @@ function asBlocks(content: unknown): Block[] {
 }
 
 /**
- * The agent sends WhatsApp messages itself, as call-mcp Bash commands. Spotting
- * those turns an opaque Bash row back into a readable reply row — the viewer's
+ * The agent sends messages itself, as Bash commands: call-mcp for WhatsApp,
+ * curl to the viewer's /api/send_message for the web page. Spotting those
+ * turns an opaque Bash row back into a readable reply row — the viewer's
  * conversation view depends on it since the old `>>> reply` parser was removed.
  */
 export function extractSend(input: unknown): string | undefined {
@@ -226,8 +227,8 @@ export function extractSend(input: unknown): string | undefined {
 		return undefined;
 	}
 
-	// The command may chain other things; only the --args payload matters.
-	const args = /--args\s+'(\{[\s\S]*?\})'/.exec(command);
+	// The command may chain other things; only the JSON payload matters.
+	const args = /--(?:args|json)\s+'(\{[\s\S]*?\})'/.exec(command);
 	if (!args?.[1]) {
 		return undefined;
 	}

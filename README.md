@@ -65,7 +65,7 @@ Config lives in `agent.config.json` (`AGENT_CONFIG` to override), state in
 | `channels.email.ownerAddress` | Only mail from here is acted on. |
 | `schedule` | Cron entries: `{id, cron, prompt}`. |
 | `polling` | Idle/active intervals, and how long "active" lasts. |
-| `viewer` | Read-only web view of the transcript, on `localhost:4317`. |
+| `viewer` | Web view of the transcript on `localhost:4317`, with a message box: what you type there reaches the agent as a `web` channel event, and it replies by POSTing to the viewer's loopback-only `/api/send_message`. The viewer does no auth of its own — whoever can reach it is treated as the owner, so put it behind your own. |
 
 If the config fails to load, the last known-good copy is used and you are told —
 so the agent can break its own config and still be reachable to fix it.

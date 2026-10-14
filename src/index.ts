@@ -14,6 +14,9 @@ import {createWhatsappChannel, WHATSAPP_CHANNEL_ID} from './channels/whatsapp.js
 import {startViewer} from './viewer/server.js';
 import {transcriptForSession} from './viewer/main.js';
 import {createEmailChannel} from './channels/email.js';
+import {
+	createWebChannel, WEB_CHANNEL_ID, WEB_THREAD_ID, type WebChannel,
+} from './channels/web.js';
 
 export type * from './types.js';
 export {Runner} from './runner.js';
@@ -82,6 +85,19 @@ export function createAgent(options: AgentOptions): Agent {
 		holder.runner?.noteReplySent(channelId, threadId);
 	});
 
+	// The viewer's message box. Only when the viewer runs, since it is the only
+	// way in; tests that pass their own channels get none.
+	const web: WebChannel | undefined = !options.channels && config.viewer.enabled
+		? createWebChannel({
+			onSent() {
+				holder.runner?.noteReplySent(WEB_CHANNEL_ID, WEB_THREAD_ID);
+			},
+		})
+		: undefined;
+	if (web) {
+		channels.push(web);
+	}
+
 	const runner = new Runner({
 		sessionId: config.sessionId,
 		model: config.model,
@@ -141,6 +157,7 @@ export function createAgent(options: AgentOptions): Agent {
 					viewer = startViewer({
 						transcriptPath: transcriptForSession(config.sessionId, config.workingDirectory),
 						port: config.viewer.port,
+						web,
 					});
 					log('viewer started', {port: config.viewer.port});
 				} catch (error) {

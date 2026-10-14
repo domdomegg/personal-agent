@@ -41,6 +41,22 @@ test('extractSend leaves other bash commands alone', () => {
 	expect(extractSend(undefined)).toBeUndefined();
 });
 
+test('extractSend recognises a web reply, sent with curl', () => {
+	const command = 'curl -sS localhost:4317/api/send_message --json \'{"message": "hi from the web"}\'';
+	expect(extractSend({command})).toBe('hi from the web');
+});
+
+test('a web message, which has no sender line, shows just its body', async () => {
+	const path = write([{
+		type: 'user',
+		timestamp: '2026-10-14T16:00:00Z',
+		message: {role: 'user', content: '[message via web — reply to thread web]\n<<<MESSAGE\nhello from the browser\n MESSAGE'},
+	}]);
+	expect(await readTranscript(path)).toEqual([
+		expect.objectContaining({kind: 'incoming', text: 'hello from the browser'}),
+	]);
+});
+
 test('a successful send renders as a delivered reply', async () => {
 	const path = write([
 		toolUse('t1', 'Bash', {command: SEND_COMMAND}),
