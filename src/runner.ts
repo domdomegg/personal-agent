@@ -129,6 +129,12 @@ export class Runner {
 	/** False until the session has been created by a first run. */
 	private started: boolean;
 
+	/**
+	 * Every event written to the current child, including those that joined
+	 * mid-run, so a run that has to be redone can redeliver all of them.
+	 */
+	private delivered: AgentEvent[] = [];
+
 	constructor(private readonly options: RunnerOptions) {
 		// A caller that already has a session (e.g. after a service restart)
 		// resumes it rather than trying to create it again.
@@ -225,7 +231,7 @@ export class Runner {
 	 */
 	private async runWithFallback(events: AgentEvent[]): Promise<void> {
 		const {model, fallbackModel} = this.options;
-		const {refused} = await this.startRun(events, model);
+		const {refused} = await this.startRunResuming(events, model);
 		if (!refused || !fallbackModel || fallbackModel === model) {
 			if (refused) {
 				// Without a fallback the message is simply dropped, so say so
@@ -237,10 +243,33 @@ export class Runner {
 		}
 
 		this.options.log?.('run refused, retrying on fallback', {model, fallbackModel});
-		const retry = await this.startRun(events, fallbackModel);
+		const retry = await this.startRunResuming(events, fallbackModel);
 		if (retry.refused) {
 			this.options.log?.('fallback also refused', {model, fallbackModel});
 		}
+	}
+
+	/**
+	 * Runs the events, and if Claude Code says the session already exists,
+	 * resumes it and delivers them again.
+	 *
+	 * This happens when a first run creates the session but is killed (e.g. a
+	 * container restart) before it exits cleanly, so the marker recording the
+	 * session is never written. Every later run then passed --session-id for a
+	 * session that exists, failed, and the agent stopped replying for good.
+	 * Keying off the error rather than looking for the session file keeps this
+	 * independent of where Claude Code stores sessions, which varies with how
+	 * the working directory resolves.
+	 */
+	private async startRunResuming(events: AgentEvent[], model: string): Promise<{refused: boolean}> {
+		const result = await this.startRun(events, model);
+		if (!result.sessionInUse) {
+			return result;
+		}
+
+		// `started` is now true, so this retry resumes and cannot loop.
+		this.options.log?.('session already exists, resuming it', {sessionId: this.options.sessionId});
+		return this.startRun(result.delivered, model);
 	}
 
 	private write(text: string): void {
@@ -259,6 +288,7 @@ export class Runner {
 	 */
 	private dispatch(event: AgentEvent): void {
 		this.write(formatEvent(event));
+		this.delivered.push(event);
 		if (event.channel !== 'system' && event.channel !== 'schedule' && !event.note) {
 			this.outstanding.set(event.id, {
 				channel: event.channel,
@@ -274,7 +304,11 @@ export class Runner {
 		}
 	}
 
-	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{refused: boolean}> {
+	private async startRun(initialEvents: AgentEvent[], model: string): Promise<{
+		refused: boolean;
+		sessionInUse: boolean;
+		delivered: AgentEvent[];
+	}> {
 		// A session id may only be *created* once: a second process passing
 		// --session-id for an existing session exits with "Session ID is already
 		// in use". Subsequent runs must --resume it instead. That resumption is
@@ -314,11 +348,13 @@ export class Runner {
 		// Whatever an earlier run left unanswered was already nudged about and
 		// logged; carrying it into this run would nag about stale traffic.
 		this.outstanding.clear();
+		this.delivered = [];
 		for (const event of initialEvents) {
 			this.dispatch(event);
 		}
 
 		let refused = false;
+		let sessionInUse = false;
 		let compactRequested = false;
 		let justCompacted = false;
 
@@ -540,6 +576,14 @@ export class Runner {
 				}
 			} else {
 				this.options.log?.('run exited non-zero', {code, stderr: stderr.slice(0, 2000)});
+				// The session exists after all: an earlier run created it but was
+				// killed before recording that. Record it now, so this and every
+				// later run resumes it.
+				if (!this.started && /Session ID \S+ is already in use/.test(stderr)) {
+					sessionInUse = true;
+					this.started = true;
+					this.options.onSessionCreated?.();
+				}
 			}
 
 			// A message still open after its nudge was consciously left unanswered
@@ -552,7 +596,7 @@ export class Runner {
 			rl.close();
 		}
 
-		return {refused};
+		return {refused, sessionInUse, delivered: this.delivered};
 	}
 }
 

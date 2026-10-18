@@ -262,4 +262,67 @@ describe('run lifecycle', () => {
 
 		expect(received(recvLogPath)).toEqual(['msg']);
 	});
+
+	// 2026-10-18: a first run created the session but was killed by a
+	// container restart before the runner recorded it. Every later run passed
+	// --session-id for a session that existed, Claude Code refused with
+	// "already in use", and the agent stopped replying for good.
+	test('a session created by an interrupted run is resumed, and the event redelivered', async () => {
+		const {logPath, recvLogPath} = scratchLogs();
+		const scratch = mkdtempSync(join(tmpdir(), 'claude-stub-'));
+		const argvLogPath = join(scratch, 'argv.log');
+		const realStub = stubClaude({logPath, recvLogPath, exitDelayMs: 50});
+		// Fails the way Claude Code does when asked to create a session that
+		// already exists; otherwise behaves as the normal stub.
+		const claudePath = join(scratch, 'claude-in-use');
+		writeFileSync(claudePath, `#!/usr/bin/env node
+const {appendFileSync} = require('node:fs');
+const {spawnSync} = require('node:child_process');
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(argvLogPath)}, args.join(' ') + '\\n');
+const at = args.indexOf('--session-id');
+if (at !== -1) {
+	process.stderr.write('Error: Session ID ' + args[at + 1] + ' is already in use.\\n');
+	process.exit(1);
+}
+const result = spawnSync(${JSON.stringify(realStub)}, args, {stdio: 'inherit'});
+process.exit(result.status ?? 1);
+`);
+		chmodSync(claudePath, 0o755);
+
+		const sessionId = randomUUID();
+		let created = 0;
+		const runner = new Runner({
+			sessionId,
+			model: 'stub-model',
+			workingDirectory: tmpdir(),
+			claudePath,
+			lingerMs: 60,
+			onSessionCreated() {
+				created += 1;
+			},
+		});
+
+		const event = makeEvent('are you there?');
+		const chain = runner.submit(event);
+		await waitFor(() => received(recvLogPath).length === 1);
+		runner.noteReplySent('whatsapp', 't');
+		await chain;
+
+		const argv = readFileSync(argvLogPath, 'utf8').trim().split('\n');
+		expect(argv).toHaveLength(2);
+		expect(argv[0]).toContain(`--session-id ${sessionId}`);
+		expect(argv[1]).toContain(`--resume ${sessionId}`);
+		// The marker is written, so a restart resumes rather than failing again.
+		expect(created).toBe(1);
+		// The message reached the resumed run exactly once, and was answered.
+		expect(received(recvLogPath)).toEqual(['msg']);
+
+		// Later runs resume directly.
+		await runner.submit(makeEvent('again', 'watch'));
+		const after = readFileSync(argvLogPath, 'utf8').trim().split('\n');
+		expect(after).toHaveLength(3);
+		expect(after[2]).toContain(`--resume ${sessionId}`);
+		expect(created).toBe(1);
+	});
 });
