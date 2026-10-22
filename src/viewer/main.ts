@@ -6,7 +6,9 @@
  * Defaults to the newest transcript for this project, which is the session the
  * agent is running in.
  */
-import {readdirSync, statSync} from 'node:fs';
+import {
+	existsSync, readdirSync, realpathSync, statSync,
+} from 'node:fs';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 import {startViewer} from './server.js';
@@ -32,9 +34,59 @@ export function newestTranscript(cwd = process.cwd()): string {
 	return files[0]!.path;
 }
 
-/** The transcript for a known session, which the agent can name exactly. */
-export function transcriptForSession(sessionId: string, cwd = process.cwd()): string {
-	return join(homedir(), '.claude', 'projects', cwd.replaceAll('/', '-'), `${sessionId}.jsonl`);
+const PROJECTS = join(homedir(), '.claude', 'projects');
+
+/** Claude Code slugifies the project path into the directory name. */
+function projectDirectory(cwd: string, projects: string): string {
+	return join(projects, cwd.replaceAll('/', '-'));
+}
+
+/**
+ * The transcript for a known session, which the agent can name exactly.
+ *
+ * Claude Code derives the projects/ subdirectory from the session's cwd, and
+ * it resolves symlinks first: with workingDirectory set to a symlink
+ * (/home/agent/personal-agent -> /home/agent/src/personal-agent) the literal
+ * slug stopped matching on 2026-10-18 and the viewer watched a file that never
+ * appeared, so the page showed nothing for four days. Prefer the real path,
+ * accept the literal one, and otherwise find the file by session id.
+ */
+export function transcriptForSession(sessionId: string, cwd = process.cwd(), projects = PROJECTS): string {
+	const literal = projectDirectory(cwd, projects);
+	let real = literal;
+	try {
+		real = projectDirectory(realpathSync(cwd), projects);
+	} catch {
+		// cwd does not exist (yet): the literal slug is the only guess.
+	}
+
+	const file = `${sessionId}.jsonl`;
+	for (const directory of [real, literal]) {
+		if (existsSync(join(directory, file))) {
+			return join(directory, file);
+		}
+	}
+
+	return locateTranscript(sessionId, projects) ?? join(real, file);
+}
+
+/** Finds a session's transcript under any project directory, by its id alone. */
+export function locateTranscript(sessionId: string, projects = PROJECTS): string | undefined {
+	let names: string[];
+	try {
+		names = readdirSync(projects);
+	} catch {
+		return undefined;
+	}
+
+	for (const name of names) {
+		const candidate = join(projects, name, `${sessionId}.jsonl`);
+		if (existsSync(candidate)) {
+			return candidate;
+		}
+	}
+
+	return undefined;
 }
 
 // Only when run directly. The agent imports transcriptForSession from here and

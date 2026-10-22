@@ -1,7 +1,9 @@
 import {
 	describe, test, expect, afterEach,
 } from 'vitest';
-import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {
+	mkdtempSync, mkdirSync, writeFileSync, rmSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer, type Server} from 'node:http';
@@ -46,6 +48,27 @@ afterEach(() => {
 });
 
 describe('startViewer', () => {
+	test('moves to the transcript locateTranscript finds when its own path never appears', async () => {
+		const directory = scratch();
+		const guessed = join(directory, '-home-agent-personal-agent', 'session.jsonl');
+		const actual = join(directory, '-home-agent-src-personal-agent', 'session.jsonl');
+		mkdirSync(join(directory, '-home-agent-src-personal-agent'));
+		writeFileSync(actual, `${JSON.stringify({type: 'user', timestamp: '2026-10-22T05:47:36Z', message: {role: 'user', content: '[message via web — reply to thread web]\n<<<MESSAGE\nHey\n MESSAGE'}})}\n`);
+
+		const viewer = startViewer({
+			transcriptPath: guessed, port: 0, locateTranscript: () => actual,
+		});
+		viewers.push(viewer);
+		const port = await viewer.ready;
+
+		const before = await (await fetch(`http://127.0.0.1:${port}/api/version`)).json() as {version: number};
+		expect(before.version).toBeGreaterThan(0);
+
+		const {entries} = await (await fetch(`http://127.0.0.1:${port}/api/entries`)).json() as {entries: {kind: string; text?: string}[]};
+		expect(entries).toHaveLength(1);
+		expect(entries[0]).toMatchObject({kind: 'incoming', text: 'Hey'});
+	});
+
 	test('starts when the transcript does not exist yet', () => {
 		const path = join(scratch(), 'session.jsonl');
 

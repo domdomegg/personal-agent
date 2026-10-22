@@ -13,7 +13,7 @@ import {Scheduler} from './scheduler.js';
 import {createMcpCaller, type McpCaller} from './mcp.js';
 import {createWhatsappChannel, WHATSAPP_CHANNEL_ID} from './channels/whatsapp.js';
 import {startViewer} from './viewer/server.js';
-import {transcriptForSession} from './viewer/main.js';
+import {locateTranscript, transcriptForSession} from './viewer/main.js';
 import {createEmailChannel} from './channels/email.js';
 import {
 	createWebChannel, WEB_CHANNEL_ID, WEB_THREAD_ID, type WebChannel,
@@ -159,6 +159,7 @@ export function createAgent(options: AgentOptions): Agent {
 				try {
 					viewer = startViewer({
 						transcriptPath: transcriptForSession(config.sessionId, config.workingDirectory),
+						locateTranscript: () => locateTranscript(config.sessionId),
 						port: config.viewer.port,
 						web,
 					});

@@ -33,6 +33,13 @@ export type ViewerOptions = {
 	desktopPort?: number | undefined;
 	/** The message box. Omitted, the page is read-only. */
 	web?: Pick<WebChannel, 'receive' | 'noteSent' | 'replyText' | 'recent'> | undefined;
+	/**
+	 * Where the transcript really is, asked whenever transcriptPath does not
+	 * exist. Claude Code decides the directory from the session's cwd and has
+	 * changed how (symlinks resolved since 2026-10); a wrong guess used to leave
+	 * the page empty for the whole session, with nothing to say it was wrong.
+	 */
+	locateTranscript?: (() => string | undefined) | undefined;
 };
 
 export type Viewer = {
@@ -170,20 +177,42 @@ export function startViewer(options: ViewerOptions): Viewer {
 	// the agent comes up. Watching the file directly threw ENOENT and left the
 	// viewer dead for the whole session, which is exactly the session you most
 	// want to watch. So watch the directory and attach once the file appears.
-	const directory = dirname(options.transcriptPath);
-	const filename = basename(options.transcriptPath);
+	let {transcriptPath} = options;
+	const directory = dirname(transcriptPath);
+	const filename = basename(transcriptPath);
 
 	let fileWatcher: FSWatcher | undefined;
 	let directoryWatcher: FSWatcher | undefined;
 
 	const watchFile = (): void => {
-		fileWatcher = watch(options.transcriptPath, () => {
+		fileWatcher = watch(transcriptPath, () => {
 			version += 1;
 			changedAt = Date.now();
 		});
 	};
 
-	if (existsSync(options.transcriptPath)) {
+	// Before answering "no transcript", check whether it exists somewhere else
+	// and move over to it. The version bump makes the switch visible to the page.
+	const relocate = (): void => {
+		if (existsSync(transcriptPath) || !options.locateTranscript) {
+			return;
+		}
+
+		const found = options.locateTranscript();
+		if (!found || found === transcriptPath) {
+			return;
+		}
+
+		transcriptPath = found;
+		fileWatcher?.close();
+		directoryWatcher?.close();
+		directoryWatcher = undefined;
+		watchFile();
+		version += 1;
+		changedAt = Date.now();
+	};
+
+	if (existsSync(transcriptPath)) {
 		watchFile();
 	} else {
 		mkdirSync(directory, {recursive: true});
@@ -192,7 +221,7 @@ export function startViewer(options: ViewerOptions): Viewer {
 				return;
 			}
 
-			if (existsSync(options.transcriptPath)) {
+			if (existsSync(transcriptPath)) {
 				// The file exists now: count its arrival as a change, hand over to
 				// watching it directly, and stop watching the directory.
 				version += 1;
@@ -255,6 +284,7 @@ export function startViewer(options: ViewerOptions): Viewer {
 		}
 
 		if (url.pathname === '/api/version') {
+			relocate();
 			send(200, 'application/json', JSON.stringify({version, changedAt}));
 			return;
 		}
@@ -264,12 +294,12 @@ export function startViewer(options: ViewerOptions): Viewer {
 		// change and the browser may cache them for good.
 		if (url.pathname === '/api/image') {
 			const id = url.searchParams.get('id') ?? '';
-			if (!existsSync(options.transcriptPath)) {
+			if (!existsSync(transcriptPath)) {
 				send(404, 'text/plain', 'no transcript');
 				return;
 			}
 
-			readImage(options.transcriptPath, id)
+			readImage(transcriptPath, id)
 				.then((image) => {
 					if (!image) {
 						send(404, 'text/plain', 'no such image');
@@ -286,14 +316,15 @@ export function startViewer(options: ViewerOptions): Viewer {
 		}
 
 		if (url.pathname === '/api/entries') {
+			relocate();
 			// Before the first turn there is nothing to read; an empty transcript
 			// is the honest answer, not a 500.
-			if (!existsSync(options.transcriptPath)) {
+			if (!existsSync(transcriptPath)) {
 				send(200, 'application/json', JSON.stringify({version, entries: withPending([], options.web?.recent() ?? [])}));
 				return;
 			}
 
-			readTranscript(options.transcriptPath, {replyText: options.web?.replyText})
+			readTranscript(transcriptPath, {replyText: options.web?.replyText})
 				.then((entries) => {
 					send(200, 'application/json', JSON.stringify({version, entries: withPending(entries, options.web?.recent() ?? [])}));
 				})
