@@ -120,6 +120,22 @@ export function createMcpCaller(options: McpOptions = {}): McpCaller {
 			throw new Error(`${tool} failed: ${parsed.slice(0, 500)}`);
 		}
 
+		// A tool that returns a list has no structuredContent (MCP only allows
+		// an object there), so call-mcp prints its text content instead: a JSON
+		// string holding the array. Since the WhatsApp server went Go-only
+		// (2026-10-26) list_messages arrives this way, and a poll that took the
+		// string as "no rows" silently dropped every new message for a night.
+		if (typeof parsed === 'string') {
+			const text = parsed.trim();
+			if (text.startsWith('[') || text.startsWith('{')) {
+				try {
+					return JSON.parse(text) as unknown;
+				} catch {
+					// Not JSON after all: hand back the text as it is.
+				}
+			}
+		}
+
 		return parsed;
 	};
 
