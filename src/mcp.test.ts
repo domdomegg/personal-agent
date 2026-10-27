@@ -53,7 +53,9 @@ describe('createMcpCaller', () => {
 	// call-mcp as text and is printed as a JSON string. Rows inside it must
 	// still come out as rows, or polling sees nothing (2026-10-26/27).
 	test('unwraps JSON carried as text content', async () => {
-		const rows = [{id: 'a', chat_jid: 'x@lid', content: 'hi', timestamp: '2026-10-27T05:54:27+00:00'}];
+		const rows = [{
+			id: 'a', chat_jid: 'x@lid', content: 'hi', timestamp: '2026-10-27T05:54:27+00:00',
+		}];
 		const call = createMcpCaller({
 			binary: stubBinary(JSON.stringify(JSON.stringify(rows, null, 2))),
 		});
