@@ -176,3 +176,38 @@ test('image results and inputs are referenced and can be read back', async () =>
 	expect(await readImage(path, 't9/out/0')).toBeUndefined();
 	expect(imageMediaType('hello world, not an image at all, just some ordinary text content here')).toBeUndefined();
 });
+
+test('incremental reader: appends, back-fills results, and re-reads a partial last line', async () => {
+	const {createTranscriptReader} = await import('./transcript.js');
+	const path = write([toolUse('t1', 'Read', {file_path: '/a'})]);
+	const reader = createTranscriptReader();
+
+	const first = await reader.read(path);
+	expect(first.map((e) => e.kind)).toEqual(['tool']);
+	expect((first[0] as {result?: string}).result).toBeUndefined();
+
+	// A partial line (no newline yet) must not be parsed or consumed.
+	const {appendFileSync} = await import('node:fs');
+	const result = JSON.stringify(toolResult('t1', 'contents of /a'));
+	appendFileSync(path, `\n${result.slice(0, 20)}`);
+	const partial = await reader.read(path);
+	expect(partial).toBe(first);
+	expect(partial.length).toBe(1);
+	expect((partial[0] as {result?: string}).result).toBeUndefined();
+
+	// The rest of the line lands: the earlier call gains its result in place.
+	appendFileSync(path, `${result.slice(20)}\n${JSON.stringify(toolUse('t2', 'Bash', {command: 'ls'}))}\n`);
+	const grown = await reader.read(path);
+	expect(grown).toBe(first);
+	expect(grown.map((e) => e.kind)).toEqual(['tool', 'tool']);
+	expect((grown[0] as {result?: string}).result).toBe('contents of /a');
+
+	// Same content as a one-shot read.
+	expect(grown).toEqual(await readTranscript(path));
+
+	// A file that shrank (rotation) starts over.
+	writeFileSync(path, `${JSON.stringify(toolUse('t3', 'Read', {file_path: '/b'}))}\n`);
+	const reset = await reader.read(path);
+	expect(reset.map((e) => (e as {name?: string}).name)).toEqual(['Read']);
+	expect(reset).not.toBe(first);
+});

@@ -7,6 +7,7 @@
  * watch a run in progress — no hooks into the runner needed.
  */
 import {createReadStream} from 'node:fs';
+import {stat} from 'node:fs/promises';
 import {createInterface} from 'node:readline';
 
 /**
@@ -89,98 +90,198 @@ export type TranscriptOptions = {
 /** The viewer answers every web reply with this id; the transcript result carries it. */
 const WEB_REPLY_ID = /"message_id":"(web-reply-[^"]+)"/;
 
-export async function readTranscript(path: string, options: TranscriptOptions = {}): Promise<Entry[]> {
-	const entries: Entry[] = [];
+type ParseState = {
+	entries: Entry[];
 	// Tool results arrive in a later user message than the call, so calls are
 	// indexed by id and back-filled when the result shows up. Sends are indexed
 	// too: a send_message call renders as a reply row, and its result decides
 	// whether the message actually reached Adam.
-	const toolsById = new Map<string, Entry & {kind: 'tool' | 'reply'}>();
+	toolsById: Map<string, Entry & {kind: 'tool' | 'reply'}>;
+};
 
-	const rl = createInterface({input: createReadStream(path), crlfDelay: Infinity});
+function newParseState(): ParseState {
+	return {entries: [], toolsById: new Map()};
+}
 
-	for await (const line of rl) {
-		if (!line.trim()) {
-			continue;
+function ingestLine(line: string, state: ParseState, options: TranscriptOptions): void {
+	const {entries, toolsById} = state;
+	if (!line.trim()) {
+		return;
+	}
+
+	let raw: Raw;
+	try {
+		raw = JSON.parse(line) as Raw;
+	} catch {
+		// Partial final line while the file is being appended to.
+		return;
+	}
+
+	const at = raw.timestamp ?? '';
+	const content = raw.message?.content;
+
+	// A message sent while a turn is already running is recorded as a
+	// queued_command attachment, not a user message — so reading only `user`
+	// records silently dropped every mid-run message Adam sent.
+	if (raw.type === 'attachment' && raw.attachment?.type === 'queued_command') {
+		const text = flatten(raw.attachment.prompt).trim();
+		if (text) {
+			entries.push({
+				kind: 'incoming', at, queued: true, text: unwrap(text),
+			});
 		}
 
-		let raw: Raw;
-		try {
-			raw = JSON.parse(line) as Raw;
-		} catch {
-			// Partial final line while the file is being appended to.
-			continue;
-		}
+		return;
+	}
 
-		const at = raw.timestamp ?? '';
-		const content = raw.message?.content;
-
-		// A message sent while a turn is already running is recorded as a
-		// queued_command attachment, not a user message — so reading only `user`
-		// records silently dropped every mid-run message Adam sent.
-		if (raw.type === 'attachment' && raw.attachment?.type === 'queued_command') {
-			const text = flatten(raw.attachment.prompt).trim();
-			if (text) {
-				entries.push({
-					kind: 'incoming', at, queued: true, text: unwrap(text),
-				});
-			}
-
-			continue;
-		}
-
-		if (raw.type === 'user') {
-			// A plain string is a real inbound message; an array is tool results.
-			if (typeof content === 'string') {
-				entries.push({kind: 'incoming', at, text: unwrap(content)});
-				continue;
-			}
-
-			for (const block of asBlocks(content)) {
-				if (block.type === 'text' && typeof block.text === 'string') {
-					entries.push({kind: 'incoming', at, text: unwrap(block.text)});
-				}
-
-				const call = block.type === 'tool_result' && typeof block.tool_use_id === 'string'
-					? toolsById.get(block.tool_use_id)
-					: undefined;
-				if (call) {
-					applyResult(call, block, options.replyText);
-				}
-			}
-
-			continue;
-		}
-
-		if (raw.type !== 'assistant') {
-			continue;
+	if (raw.type === 'user') {
+		// A plain string is a real inbound message; an array is tool results.
+		if (typeof content === 'string') {
+			entries.push({kind: 'incoming', at, text: unwrap(content)});
+			return;
 		}
 
 		for (const block of asBlocks(content)) {
-			if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
-				entries.push(...splitText(block.text, at));
+			if (block.type === 'text' && typeof block.text === 'string') {
+				entries.push({kind: 'incoming', at, text: unwrap(block.text)});
 			}
 
-			if (block.type === 'tool_use' && typeof block.id === 'string') {
-				const name = typeof block.name === 'string' ? block.name : 'tool';
-				const sent = name === 'Bash' ? extractSend(block.input) : undefined;
-				const entry: Entry & {kind: 'tool' | 'reply'} = sent
-					? {kind: 'reply', at, text: sent}
-					: {
-						kind: 'tool',
-						at,
-						name,
-						input: describeInput(block.input),
-						...describeDetail(name, block.input),
-						...describeInputImages(block.id, block.input),
-					};
-				toolsById.set(block.id, entry);
-				entries.push(entry);
+			const call = block.type === 'tool_result' && typeof block.tool_use_id === 'string'
+				? toolsById.get(block.tool_use_id)
+				: undefined;
+			if (call) {
+				applyResult(call, block, options.replyText);
 			}
 		}
+
+		return;
 	}
 
-	return entries;
+	if (raw.type !== 'assistant') {
+		return;
+	}
+
+	for (const block of asBlocks(content)) {
+		if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+			entries.push(...splitText(block.text, at));
+		}
+
+		if (block.type === 'tool_use' && typeof block.id === 'string') {
+			const name = typeof block.name === 'string' ? block.name : 'tool';
+			const sent = name === 'Bash' ? extractSend(block.input) : undefined;
+			const entry: Entry & {kind: 'tool' | 'reply'} = sent
+				? {kind: 'reply', at, text: sent}
+				: {
+					kind: 'tool',
+					at,
+					name,
+					input: describeInput(block.input),
+					...describeDetail(name, block.input),
+					...describeInputImages(block.id, block.input),
+				};
+			toolsById.set(block.id, entry);
+			entries.push(entry);
+		}
+	}
+}
+
+export async function readTranscript(path: string, options: TranscriptOptions = {}): Promise<Entry[]> {
+	const state = newParseState();
+	const rl = createInterface({input: createReadStream(path), crlfDelay: Infinity});
+
+	for await (const line of rl) {
+		ingestLine(line, state, options);
+	}
+
+	return state.entries;
+}
+
+export type TranscriptReader = {
+	/**
+	 * Entries for the transcript at `path`. The array is the reader's own and
+	 * is extended in place on later calls; callers must not mutate it.
+	 */
+	read(path: string): Promise<Entry[]>;
+};
+
+/**
+ * Reads a transcript incrementally. Claude Code only ever appends to the
+ * file, so after the first pass only the bytes past the last complete line
+ * are read and parsed; results that back-fill an earlier call update that
+ * entry in place. A path change or a file that shrank (session rotation,
+ * rewrite) starts over. Re-parsing a 200MB transcript on every poll took ~2s
+ * and made the viewer lag; this takes milliseconds.
+ */
+export function createTranscriptReader(options: TranscriptOptions = {}): TranscriptReader {
+	let path: string | undefined;
+	let state = newParseState();
+	// Byte offset of the first unconsumed byte: the start of a partial line if
+	// the file ends mid-write, else the end of the file.
+	let offset = 0;
+	let pending: Promise<Entry[]> | undefined;
+
+	const readFrom = async (target: string): Promise<Entry[]> => {
+		const {size} = await stat(target);
+		if (target !== path || size < offset) {
+			path = target;
+			state = newParseState();
+			offset = 0;
+		}
+
+		if (size === offset) {
+			return state.entries;
+		}
+
+		let remainder = Buffer.alloc(0);
+		let total = 0;
+		for await (const chunk of createReadStream(target, {start: offset})) {
+			const bytes = chunk as Buffer;
+			total += bytes.length;
+			const buffer = remainder.length > 0 ? Buffer.concat([remainder, bytes]) : bytes;
+			let lineStart = 0;
+			let newline = buffer.indexOf(0x0A);
+			while (newline !== -1) {
+				ingestLine(buffer.toString('utf8', lineStart, newline), state, options);
+				lineStart = newline + 1;
+				newline = buffer.indexOf(0x0A, lineStart);
+			}
+
+			// Copied so the chunk it came from can be collected.
+			remainder = Buffer.from(buffer.subarray(lineStart));
+		}
+
+		// A last line with no newline is usually a write in progress and is left
+		// for next time — unless it already parses, in which case it is a complete
+		// record (a file written without a trailing newline) and is taken now.
+		if (remainder.length > 0) {
+			const text = remainder.toString('utf8');
+			try {
+				JSON.parse(text);
+				ingestLine(text, state, options);
+				remainder = Buffer.alloc(0);
+			} catch {
+				// Partial; re-read once its newline has landed.
+			}
+		}
+
+		offset += total - remainder.length;
+		return state.entries;
+	};
+
+	return {
+		async read(target) {
+			// Serialise: two overlapping reads would both append the same lines.
+			const run = (pending ?? Promise.resolve([])).then(async () => readFrom(target), async () => readFrom(target));
+			pending = run;
+			try {
+				return await run;
+			} finally {
+				if (pending === run) {
+					pending = undefined;
+				}
+			}
+		},
+	};
 }
 
 /**

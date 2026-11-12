@@ -249,12 +249,15 @@ function diffBlock(detail) {
   return wrap;
 }
 
-function render(entries) {
-  latest = entries;
-  if (!entries.length) { root.innerHTML = '<div class="empty">nothing yet</div>'; return; }
-  const frag = document.createDocumentFragment();
+// One DOM row per entry, kept across polls. Only rows whose entry changed are
+// rebuilt (a tool call gaining its result, a pending message landing) and new
+// ones appended; rebuilding all few-thousand rows on every change made the
+// page lag.
+const rows = [];
+const sigs = [];
 
-  entries.forEach((e, i) => {
+function buildRow(e, i) {
+
     const row = document.createElement('div');
     row.className = 'row ' + e.kind + (e.failed ? ' failed' : '') + (e.queued ? ' queued' : '') + (e.pending ? ' pending' : '');
 
@@ -359,10 +362,43 @@ function render(entries) {
     }
 
     row.append(t, tag, body);
-    frag.append(row);
-  });
+    return row;
+}
 
-  root.replaceChildren(frag);
+const signature = (e) => JSON.stringify(e);
+
+// Apply entries as the state from index from onwards; earlier rows are
+// already correct.
+function render(entries, from = 0) {
+  latest = entries;
+  if (!entries.length) {
+    rows.length = 0;
+    sigs.length = 0;
+    root.innerHTML = '<div class="empty">nothing yet</div>';
+    return;
+  }
+  if (rows.length === 0 || root.firstElementChild?.className === 'empty') root.replaceChildren();
+  while (rows.length > entries.length) {
+    rows.pop().remove();
+    sigs.pop();
+  }
+  const frag = document.createDocumentFragment();
+  for (let i = Math.min(from, rows.length); i < entries.length; i++) {
+    const sig = signature(entries[i]);
+    if (i < rows.length) {
+      if (sigs[i] === sig) continue;
+      const row = buildRow(entries[i], i);
+      rows[i].replaceWith(row);
+      rows[i] = row;
+      sigs[i] = sig;
+    } else {
+      const row = buildRow(entries[i], i);
+      rows.push(row);
+      sigs.push(sig);
+      frag.append(row);
+    }
+  }
+  if (frag.childNodes.length) root.append(frag);
 }
 
 // Body classes: state from the poll loop, view from the URL hash, composer
@@ -395,12 +431,23 @@ function computeState() {
   return 'idle';
 }
 
+// How far back to re-fetch: a result can back-fill a call a few entries
+// up, and pending web messages sit at the very end.
+const TAIL = 12;
+
 async function refresh() {
-  const r = await fetch('/api/entries');
-  const data = await r.json();
+  const from = Math.max(0, latest.length - TAIL);
+  let r = await fetch('/api/entries?from=' + from);
+  let data = await r.json();
+  // The transcript shrank or moved (session rotation): start over.
+  if (data.total < from || data.from !== from) {
+    r = await fetch('/api/entries');
+    data = await r.json();
+  }
+  const entries = data.from > 0 ? latest.slice(0, data.from).concat(data.entries) : data.entries;
   const wasAtBottom = atBottom();
-  const grew = Math.max(0, data.entries.length - latest.length);
-  render(data.entries);
+  const grew = Math.max(0, entries.length - latest.length);
+  render(entries, data.from);
   if (wasAtBottom) {
     window.scrollTo(0, document.body.scrollHeight);
   } else {
@@ -473,6 +520,9 @@ if (CHAT) {
 syncBodyClass();
 refresh().then(() => window.scrollTo(0, document.body.scrollHeight));
 poll();
+// The page is for talking to the agent as much as watching it: start with
+// the caret in the box.
+if (CHAT) document.getElementById('message')?.focus();
 </script>
 </html>`;
 }

@@ -17,7 +17,9 @@ import {
 } from 'node:fs';
 import {dirname, basename} from 'node:path';
 import {hostname} from 'node:os';
-import {readTranscript, readImage, type Entry} from './transcript.js';
+import {
+	createTranscriptReader, readImage, type Entry,
+} from './transcript.js';
 import {streamPage} from './stream.js';
 import {connectPage} from './connect.js';
 import type {WebChannel} from '../channels/web.js';
@@ -171,6 +173,7 @@ export function startViewer(options: ViewerOptions): Viewer {
 	// in progress even when no tool call is visibly unresolved.
 	let version = 0;
 	let changedAt = 0;
+	const reader = createTranscriptReader({replyText: options.web?.replyText});
 
 	// Claude Code writes the transcript on the session's first turn, so on a
 	// fresh session there is no file — and often no projects/ directory — when
@@ -317,17 +320,25 @@ export function startViewer(options: ViewerOptions): Viewer {
 
 		if (url.pathname === '/api/entries') {
 			relocate();
+			// `from` lets the page fetch just the tail: with thousands of entries,
+			// shipping and re-rendering all of them on every change made it lag.
+			const from = Math.max(0, Number(url.searchParams.get('from') ?? 0) || 0);
+			const reply = (entries: Entry[]) => {
+				const all = withPending(entries, options.web?.recent() ?? []);
+				send(200, 'application/json', JSON.stringify({
+					version, total: all.length, from: Math.min(from, all.length), entries: from > 0 ? all.slice(from) : all,
+				}));
+			};
+
 			// Before the first turn there is nothing to read; an empty transcript
 			// is the honest answer, not a 500.
 			if (!existsSync(transcriptPath)) {
-				send(200, 'application/json', JSON.stringify({version, entries: withPending([], options.web?.recent() ?? [])}));
+				reply([]);
 				return;
 			}
 
-			readTranscript(transcriptPath, {replyText: options.web?.replyText})
-				.then((entries) => {
-					send(200, 'application/json', JSON.stringify({version, entries: withPending(entries, options.web?.recent() ?? [])}));
-				})
+			reader.read(transcriptPath)
+				.then(reply)
 				.catch((error: unknown) => {
 					send(500, 'application/json', JSON.stringify({error: String(error)}));
 				});
