@@ -13,10 +13,10 @@ import {
 } from 'node:http';
 import {connect as netConnect, type Socket} from 'node:net';
 import {
-	watch, existsSync, mkdirSync, type FSWatcher, readFileSync,
+	watch, existsSync, mkdirSync, type FSWatcher, readFileSync, readdirSync, statSync,
 } from 'node:fs';
 import {dirname, basename, resolve} from 'node:path';
-import {hostname} from 'node:os';
+import {hostname, homedir} from 'node:os';
 import {
 	createTranscriptReader, readImage, type Entry,
 } from './transcript.js';
@@ -31,6 +31,8 @@ export type ViewerOptions = {
 	isRunning?: (() => boolean) | undefined;
 	/** Directory of throwaway UI prototypes served at /proto/<file>; default ./proto. */
 	protoDir?: string | undefined;
+	/** Directory of files the agent publishes for Adam at /a/<file>; default ~/work/artifacts. */
+	artifactsDir?: string | undefined;
 	/**
 	 * Where noVNC (websockify) for the agent's desktop listens. /desktop/ is
 	 * proxied to it, so the desktop shares the viewer's hostname and auth
@@ -296,21 +298,43 @@ export function startViewer(options: ViewerOptions): Viewer {
 			return;
 		}
 
-		// UI prototypes: plain files from ./proto, so a look can be iterated on
-		// against the live /api data without rebuilding or restarting the agent.
-		if (url.pathname.startsWith('/proto/')) {
-			const name = url.pathname.slice('/proto/'.length);
-			const file = resolve(options.protoDir ?? resolve(process.cwd(), 'proto'), name);
-			const dir = resolve(options.protoDir ?? resolve(process.cwd(), 'proto'));
-			if (!/^[\w.-]+\.(html|css|js|svg|png)$/.test(name) || !file.startsWith(`${dir}/`) || !existsSync(file)) {
-				send(404, 'text/plain', 'no such prototype');
+		// Artifacts: a poor-man's artifact host. Files the agent drops into
+		// artifactsDir are served at /a/<name> (with /a/ as an index), read
+		// fresh each time, behind the same auth as the rest of the viewer. UI
+		// prototypes live in ./proto and are served the same way at /proto/<name>.
+		const served: [string, string][] = [
+			['/a/', options.artifactsDir ?? resolve(homedir(), 'work', 'artifacts')],
+			['/proto/', options.protoDir ?? resolve(process.cwd(), 'proto')],
+		];
+		for (const [prefix, dirRaw] of served) {
+			if (!url.pathname.startsWith(prefix)) {
+				continue;
+			}
+
+			const dir = resolve(dirRaw);
+			const name = decodeURIComponent(url.pathname.slice(prefix.length));
+			if (name === '') {
+				const files = existsSync(dir)
+					? readdirSync(dir).filter((f) => !f.startsWith('.') && statSync(resolve(dir, f)).isFile()).sort()
+					: [];
+				const items = files.map((f) => `<li><a href="${prefix}${encodeURIComponent(f)}">${escapeHtml(f)}</a> <small>${statSync(resolve(dir, f)).mtime.toISOString().slice(0, 16).replace('T', ' ')}</small></li>`).join('');
+				send(200, 'text/html; charset=utf-8', `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${prefix}</title><style>body{font:15px system-ui;margin:24px;color:#222}li{margin:4px 0}small{color:#888;margin-left:8px}</style><h1>${prefix}</h1>${files.length ? `<ul>${items}</ul>` : '<p>nothing here yet</p>'}`);
+				return;
+			}
+
+			const file = resolve(dir, name);
+			if (!/^[\w][\w.\- ]*\.(html|htm|css|js|mjs|json|svg|png|jpe?g|gif|webp|pdf|txt|md|csv)$/i.test(name) || !file.startsWith(`${dir}/`) || !existsSync(file)) {
+				send(404, 'text/plain', 'no such file');
 				return;
 			}
 
 			const types: Record<string, string> = {
-				html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', svg: 'image/svg+xml', png: 'image/png',
+				html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
+				js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', json: 'application/json',
+				svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+				pdf: 'application/pdf', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/csv; charset=utf-8',
 			};
-			const ext = name.slice(name.lastIndexOf('.') + 1);
+			const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
 			response.writeHead(200, {'content-type': types[ext] ?? 'application/octet-stream', 'cache-control': 'no-store'});
 			response.end(readFileSync(file));
 			return;
@@ -430,3 +454,9 @@ export function startViewer(options: ViewerOptions): Viewer {
 }
 
 export type {Entry};
+
+function escapeHtml(text: string): string {
+	return text.replace(/[&<>"']/g, (c) => ({
+		'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;',
+	}[c] ?? c));
+}
