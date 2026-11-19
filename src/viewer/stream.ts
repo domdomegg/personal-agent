@@ -337,6 +337,22 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .chat-only .row.in-run.run-open, [data-ui="a"] .chat-only .typing ~ .run { display: none; }
   [data-ui="a"] .chat-only .row.tool, [data-ui="a"] .chat-only .row.notes { display: none; }
   @media (max-width: 640px) { [data-ui="a"] .row .t::after { content: none; } }
+
+  /* look a: system dividers + in-bubble timestamps */
+  [data-ui="a"] .row.from-system { display: flex; flex-direction: column; align-items: center; padding: 4px 14px; cursor: pointer; }
+  [data-ui="a"] .row.from-system .tag { display: none; }
+  [data-ui="a"] .row.from-system .syslabel {
+    font: 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--dim); letter-spacing: .02em;
+    padding: 2px 10px; border-radius: 999px; background: var(--them); opacity: .8;
+  }
+  [data-ui="a"] .row.from-system .sysfull { display: none; max-width: 90%; margin-top: 6px; font-size: 12px; color: var(--dim); text-align: left; white-space: pre-wrap; background: transparent; padding: 0; -webkit-line-clamp: unset; }
+  [data-ui="a"] .row.from-system.open .sysfull { display: block; }
+  [data-ui="a"] .chat-only .row.from-system { display: none; }
+  [data-ui="a"] .t.inside { float: right; margin: 6px 0 0 10px; font-size: 10.5px; line-height: 1; opacity: .65; position: relative; top: 4px; font-family: system-ui, -apple-system, sans-serif; }
+  [data-ui="a"] .row.incoming .t.inside { color: var(--me-text); }
+  [data-ui="a"] .row.reply .t.inside { color: var(--dim); }
+  [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body { padding-right: 12px; }
+  [data-ui="a"] .delivery { margin-top: 2px; }
 </style>
 <header>
   <h1>AGENT</h1>
@@ -396,7 +412,7 @@ const CHAT = ${chat ? 'true' : 'false'};
 })();
 // Long tool commands are clamped; tap the head to see the whole thing.
 document.addEventListener('click', (ev) => {
-  const head = ev.target.closest('.row.tool .head, .row.notes .body');
+  const head = ev.target.closest('.row.tool .head, .row.notes .body, .row.from-system');
   if (head) head.closest('.row').classList.toggle('open');
 });
 const root = document.getElementById('root');
@@ -581,8 +597,39 @@ function buildRow(e, i) {
       body.textContent = e.text;
     }
 
+    const bubbleLook = document.documentElement.dataset.ui === 'a' && (e.kind === 'incoming' || e.kind === 'reply');
+    if (bubbleLook && e.system) {
+      // Service chatter (restarts, scheduled runs, reply checks) becomes a
+      // one-line divider with a short label; tap for the full text.
+      const label = document.createElement('span');
+      label.className = 'syslabel';
+      label.textContent = systemLabel(e.text) + ' · ' + time(e.at);
+      body.classList.add('sysfull');
+      row.append(label, body);
+      return row;
+    }
+    if (bubbleLook) {
+      // Time sits inside the bubble, bottom-right, so it is obviously part of it.
+      t.classList.add('inside');
+      body.append(t);
+      row.append(tag, body);
+      return row;
+    }
+
     row.append(t, tag, body);
     return row;
+}
+
+function systemLabel(text) {
+  const head = text.slice(0, 160);
+  let m;
+  if (/Self-restart completed/.test(head)) return 'restarted';
+  if (/started at .* with no pending-restart marker/.test(head)) return 'unexpected start';
+  if ((m = /\[scheduled task: schedule:([^:\]]+)/.exec(head))) return 'scheduled run · ' + m[1];
+  if (/Reply check/.test(head)) return 'reply check';
+  if (/background[- ]task|SYSTEM NOTIFICATION/i.test(head)) return 'background task finished';
+  if (/hasn't heard from you/.test(head)) return 'nudge';
+  return 'system';
 }
 
 const signature = (e) => JSON.stringify(e);
@@ -643,12 +690,13 @@ function groupRuns() {
     const tools = latest.slice(i, j).filter((e) => e.kind === 'tool').length;
     const ms = Date.parse(latest[j - 1].at) - Date.parse(latest[i].at);
     const dur = !isFinite(ms) || ms < 1000 ? '' : ms < 60000 ? Math.round(ms / 1000) + 's' : Math.round(ms / 60000) + 'm';
+    const start = i;
     const sum = document.createElement('div');
     sum.className = 'run' + (open ? ' open' : '') + (last && state === 'working' ? ' live' : '');
     const verb = last && state === 'working' ? 'working' : (tools ? 'worked' : 'thought');
     sum.textContent = verb + (tools ? ' · ' + tools + (tools === 1 ? ' step' : ' steps') : '') + (dur ? ' · ' + dur : '');
     sum.addEventListener('click', () => {
-      if (openRuns.has(i)) openRuns.delete(i); else openRuns.add(i);
+      if (openRuns.has(start)) openRuns.delete(start); else openRuns.add(start);
       groupRuns();
     });
     rows[i].before(sum);
