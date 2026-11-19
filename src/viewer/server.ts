@@ -13,9 +13,9 @@ import {
 } from 'node:http';
 import {connect as netConnect, type Socket} from 'node:net';
 import {
-	watch, existsSync, mkdirSync, type FSWatcher,
+	watch, existsSync, mkdirSync, type FSWatcher, readFileSync,
 } from 'node:fs';
-import {dirname, basename} from 'node:path';
+import {dirname, basename, resolve} from 'node:path';
 import {hostname} from 'node:os';
 import {
 	createTranscriptReader, readImage, type Entry,
@@ -27,6 +27,10 @@ import type {WebChannel} from '../channels/web.js';
 export type ViewerOptions = {
 	transcriptPath: string;
 	port: number;
+	/** Whether a turn is running right now; the page shows working/idle from this. */
+	isRunning?: (() => boolean) | undefined;
+	/** Directory of throwaway UI prototypes served at /proto/<file>; default ./proto. */
+	protoDir?: string | undefined;
 	/**
 	 * Where noVNC (websockify) for the agent's desktop listens. /desktop/ is
 	 * proxied to it, so the desktop shares the viewer's hostname and auth
@@ -288,7 +292,27 @@ export function startViewer(options: ViewerOptions): Viewer {
 
 		if (url.pathname === '/api/version') {
 			relocate();
-			send(200, 'application/json', JSON.stringify({version, changedAt}));
+			send(200, 'application/json', JSON.stringify({version, changedAt, running: options.isRunning?.() ?? false}));
+			return;
+		}
+
+		// UI prototypes: plain files from ./proto, so a look can be iterated on
+		// against the live /api data without rebuilding or restarting the agent.
+		if (url.pathname.startsWith('/proto/')) {
+			const name = url.pathname.slice('/proto/'.length);
+			const file = resolve(options.protoDir ?? resolve(process.cwd(), 'proto'), name);
+			const dir = resolve(options.protoDir ?? resolve(process.cwd(), 'proto'));
+			if (!/^[\w.-]+\.(html|css|js|svg|png)$/.test(name) || !file.startsWith(`${dir}/`) || !existsSync(file)) {
+				send(404, 'text/plain', 'no such prototype');
+				return;
+			}
+
+			const types: Record<string, string> = {
+				html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', svg: 'image/svg+xml', png: 'image/png',
+			};
+			const ext = name.slice(name.lastIndexOf('.') + 1);
+			response.writeHead(200, {'content-type': types[ext] ?? 'application/octet-stream', 'cache-control': 'no-store'});
+			response.end(readFileSync(file));
 			return;
 		}
 

@@ -162,6 +162,7 @@ export function createAgent(options: AgentOptions): Agent {
 						locateTranscript: () => locateTranscript(config.sessionId),
 						port: config.viewer.port,
 						web,
+						isRunning: () => holder.runner?.isRunning ?? false,
 					});
 					log('viewer started', {port: config.viewer.port});
 				} catch (error) {

@@ -353,6 +353,11 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .row.reply .t.inside { color: var(--dim); }
   [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body { padding-right: 12px; }
   [data-ui="a"] .delivery { margin-top: 2px; }
+
+  [data-ui="a"] .typing .lbl { font: 11px system-ui, -apple-system, sans-serif; color: var(--dim); margin-left: 6px; }
+  [data-ui="a"] .typing.doing { background: transparent; border: 1px dashed var(--line); border-radius: 10px; padding: 7px 12px; }
+  [data-ui="a"] .typing .spin { width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 <header>
   <h1>AGENT</h1>
@@ -409,6 +414,12 @@ const CHAT = ${chat ? 'true' : 'false'};
   const ui = localStorage.getItem('ui') || 'a';
   document.documentElement.dataset.ui = ui;
   for (const a of document.querySelectorAll('#uiPick a')) a.classList.toggle('active', a.dataset.ui === ui);
+  // Prototyping: ?css=<name> layers /proto/<name>.css over the built-in styles
+  // (no restart needed to iterate); ?css= clears it.
+  const c = new URLSearchParams(location.search).get('css');
+  if (c !== null) { if (c) localStorage.setItem('css', c); else localStorage.removeItem('css'); history.replaceState(null, '', location.pathname + location.hash); }
+  const css = localStorage.getItem('css');
+  if (css) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/proto/' + encodeURIComponent(css) + '.css?v=' + Date.now(); document.head.append(l); }
 })();
 // Long tool commands are clamped; tap the head to see the whole thing.
 document.addEventListener('click', (ev) => {
@@ -625,7 +636,7 @@ function systemLabel(text) {
   let m;
   if (/Self-restart completed/.test(head)) return 'restarted';
   if (/started at .* with no pending-restart marker/.test(head)) return 'unexpected start';
-  if ((m = /\[scheduled task: schedule:([^:\]]+)/.exec(head))) return 'scheduled run · ' + m[1];
+  if ((m = /\\[scheduled task: schedule:([^:\\]]+)/.exec(head))) return 'scheduled run · ' + m[1];
   if (/Reply check/.test(head)) return 'reply check';
   if (/background[- ]task|SYSTEM NOTIFICATION/i.test(head)) return 'background task finished';
   if (/hasn't heard from you/.test(head)) return 'nudge';
@@ -712,9 +723,17 @@ function syncTyping() {
   if (want && !typingEl) {
     typingEl = document.createElement('div');
     typingEl.className = 'typing';
-    typingEl.innerHTML = '<span></span><span></span><span></span>';
   }
-  if (want) root.append(typingEl); else if (typingEl) { typingEl.remove(); }
+  if (want) {
+    // Doing (a tool call in flight) vs thinking (text being generated).
+    const last = latest[latest.length - 1];
+    const doing = last && last.kind === 'tool' && !last.result ? last.name : null;
+    typingEl.className = 'typing' + (doing ? ' doing' : '');
+    typingEl.innerHTML = doing
+      ? '<i class="spin"></i><span class="lbl">running ' + doing.replace(/[<>&]/g, '') + '</span>'
+      : '<span></span><span></span><span></span><span class="lbl">thinking</span>';
+    root.append(typingEl);
+  } else if (typingEl) { typingEl.remove(); }
 }
 
 // Body classes: state from the poll loop, view from the URL hash, composer
@@ -741,10 +760,12 @@ function setState(next) {
   if (changed) { groupRuns(); syncTyping(); }
 }
 
+let running = false; // the runner's own word, from /api/version
 function computeState() {
+  if (running) return 'working';
   const last = latest[latest.length - 1];
   const unresolved = last && (last.kind === 'tool' || last.kind === 'reply') && !last.result;
-  // Working = a call is in flight, or the transcript moved in the last 15s.
+  // Fallback for older servers: a call in flight, or the transcript moved in the last 15s.
   if (unresolved || Date.now() - changedAt < 15000) return 'working';
   return 'idle';
 }
@@ -781,6 +802,7 @@ async function poll() {
     const r = await fetch('/api/version');
     const data = await r.json();
     if (data.changedAt) changedAt = data.changedAt;
+    running = Boolean(data.running);
     if (data.version !== seen) await refresh();
     setState(computeState());
   } catch {
