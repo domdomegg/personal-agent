@@ -14,7 +14,7 @@
 const COMPOSER = `<span id="composerNote"></span>
 <form id="composer">
   <textarea id="message" rows="1" placeholder="message the agent" aria-label="message the agent"></textarea>
-  <button type="submit" id="sendButton">send</button>
+  <button type="submit" id="sendButton" aria-label="send" title="send"><span class="word">send</span><svg class="icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 </form>`;
 
 export function streamPage(options: {chat?: boolean} = {}): string {
@@ -359,6 +359,22 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .typing.doing { background: transparent; border: 1px dashed var(--line); border-radius: 10px; padding: 7px 12px; }
   [data-ui="a"] .typing .spin { width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* look a, round 3: system pill, composer width/height, indicator parity, icon send, links */
+  #sendButton .icon { display: none; }
+  [data-ui="a"] .row.from-system .syslabel { line-height: 1.7; display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  [data-ui="a"] #composer { left: 50%; right: auto; transform: translateX(-50%); width: min(100%, 820px); }
+  [data-ui="a"] .has-composer main { padding-bottom: calc(var(--composer-h, 72px) + 28px); }
+  [data-ui="a"] .has-composer #jump { bottom: calc(var(--composer-h, 72px) + 16px); }
+  [data-ui="a"] .typing.doing { background: var(--them); border: 0; border-radius: 16px; border-bottom-left-radius: 5px; padding: 12px 14px; }
+  [data-ui="a"] .typing.doing span:not(.lbl) { background: var(--accent); }
+  [data-ui="a"] .status { display: none; }
+  [data-ui="a"] #sendButton { width: 40px; height: 40px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  [data-ui="a"] #sendButton .word { display: none; }
+  [data-ui="a"] #sendButton .icon { display: block; }
+  [data-ui="a"] .body a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 2px; }
+  [data-ui="a"] .row.reply .body a { color: var(--accent); }
+  .body a { color: var(--tool); }
 </style>
 <header>
   <h1>AGENT</h1>
@@ -606,7 +622,7 @@ function buildRow(e, i) {
         body.append(d);
       }
     } else {
-      body.textContent = e.text;
+      linkify(body, e.text);
     }
 
     const bubbleLook = document.documentElement.dataset.ui === 'a' && (e.kind === 'incoming' || e.kind === 'reply');
@@ -630,6 +646,20 @@ function buildRow(e, i) {
 
     row.append(t, tag, body);
     return row;
+}
+
+// Plain text with URLs turned into links; everything else stays text nodes.
+function linkify(el, text) {
+  const re = /https?:\\/\\/[^\\s<>()"'\\]]+[^\\s<>()"'\\].,;:!?]/g;
+  let last = 0; let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) el.append(text.slice(last, m.index));
+    const a = document.createElement('a');
+    a.href = m[0]; a.textContent = m[0]; a.target = '_blank'; a.rel = 'noopener';
+    el.append(a);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) el.append(text.slice(last));
 }
 
 function systemLabel(text) {
@@ -730,9 +760,7 @@ function syncTyping() {
     const last = latest[latest.length - 1];
     const doing = last && last.kind === 'tool' && !last.result ? last.name : null;
     typingEl.className = 'typing' + (doing ? ' doing' : '');
-    typingEl.innerHTML = doing
-      ? '<i class="spin"></i><span class="lbl">running ' + doing.replace(/[<>&]/g, '') + '</span>'
-      : '<span></span><span></span><span></span><span class="lbl">thinking</span>';
+    typingEl.innerHTML = '<span></span><span></span><span></span><span class="lbl">' + (doing ? 'running ' + doing.replace(/[<>&]/g, '') : 'thinking') + '</span>';
     root.append(typingEl);
   } else if (typingEl) { typingEl.remove(); }
 }
@@ -812,12 +840,12 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
-// Optimistic echo of a just-sent message. Removed once the same text shows
-// up as a real incoming entry (the agent has it); until then it carries a
-// delivery state like a messaging app would.
-let optimistic = null;
+// Optimistic echoes of just-sent messages, one per send (a quick follow-up
+// must not knock the previous one out before the transcript has it). Each is
+// removed once the same text shows up as a real incoming entry; until then it
+// carries a delivery state like a messaging app would.
+const optimistic = [];
 function showOptimistic(text) {
-  clearOptimistic();
   const row = document.createElement('div');
   row.className = 'row incoming from-adam optimistic';
   const body = document.createElement('span');
@@ -828,16 +856,17 @@ function showOptimistic(text) {
   st.textContent = 'sent';
   row.append(body, st);
   (typingEl && typingEl.parentNode ? typingEl : null)?.before(row) || root.append(row);
-  optimistic = {row, text, at: Date.now()};
+  optimistic.push({row, text, at: Date.now()});
   window.scrollTo(0, document.body.scrollHeight);
 }
-function clearOptimistic() { if (optimistic) { optimistic.row.remove(); optimistic = null; } }
 function reconcileOptimistic() {
-  if (!optimistic) return;
-  const seen = latest.some((e) => e.kind === 'incoming' && e.text === optimistic.text && !e.pending && Date.parse(e.at) >= optimistic.at - 60000);
-  if (seen) { clearOptimistic(); return; }
-  const pending = latest.some((e) => e.kind === 'incoming' && e.text === optimistic.text && e.pending);
-  optimistic.row.querySelector('.delivery').textContent = pending ? 'delivered' : 'sent';
+  for (let i = optimistic.length - 1; i >= 0; i--) {
+    const o = optimistic[i];
+    const seen = latest.some((e) => e.kind === 'incoming' && e.text === o.text && !e.pending && Date.parse(e.at) >= o.at - 60000);
+    if (seen) { o.row.remove(); optimistic.splice(i, 1); continue; }
+    const pending = latest.some((e) => e.kind === 'incoming' && e.text === o.text && e.pending);
+    o.row.querySelector('.delivery').textContent = pending ? 'delivered' : 'sent';
+  }
 }
 
 if (CHAT) {
@@ -848,11 +877,14 @@ if (CHAT) {
 
   const grow = () => {
     box.style.height = 'auto';
-    const max = Math.round(window.innerHeight * 0.4);
+    const max = Math.round(window.innerHeight * 0.3);
     box.style.height = Math.min(box.scrollHeight, max) + 'px';
     // No scrollbar until the text really overflows: an always-on gutter looked broken.
     box.style.overflowY = box.scrollHeight > max ? 'auto' : 'hidden';
+    // Keep the thread readable above a tall box: pad the page by the box's height.
+    document.documentElement.style.setProperty('--composer-h', form.offsetHeight + 'px');
   };
+  window.addEventListener('resize', grow);
   grow();
   box.addEventListener('input', grow);
   // Enter sends, shift+enter is a newline — except on touch keyboards, where
