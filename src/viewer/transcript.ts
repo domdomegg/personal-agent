@@ -30,7 +30,13 @@ export type ImageRef = {id: string; direction: 'in' | 'out'};
 
 export type Entry =
 	/** `queued` marks a message that arrived while a turn was already running. */
-	| {kind: 'incoming'; at: string; text: string; queued?: boolean; pending?: boolean}
+	| {
+		kind: 'incoming'; at: string; text: string; queued?: boolean; pending?: boolean;
+		/** Channel the message came in on (whatsapp, web, email) and the thread id. */
+		via?: string; thread?: string;
+		/** Injected by the service (restart notices, scheduled runs, reply checks), not a person. */
+		system?: boolean;
+	}
 	/**
 	 * A delivered outgoing message. Modern transcripts: a send_message tool
 	 * call, recognised by its command and upgraded to a reply row (failed =
@@ -59,10 +65,26 @@ export type Entry =
 const REPLY_MARKER = /^>>> reply channel=\S+ thread=\S+[ \t]*\n?/m;
 
 /** Inbound messages arrive wrapped in a routing envelope; show just the body. */
-const ENVELOPE = /^\[message via [^\]]+](?:\nfrom: \S+)?\n<<<MESSAGE\n([\s\S]*?)\n\s*MESSAGE\s*$/;
+const ENVELOPE = /^\[message via ([^\]\s—]+)(?: — reply to thread (\S+))?\](?:\nfrom: \S+)?\n<<<MESSAGE\n([\s\S]*?)\n\s*MESSAGE\s*$/;
 
-function unwrap(text: string): string {
-	return ENVELOPE.exec(text)?.[1]?.trim() ?? text.trim();
+/** Things the service itself injects into the conversation, not people. */
+const SYSTEM_PREFIX = /^\s*(\[system notice\]|\[scheduled task|\[SYSTEM NOTIFICATION|Reply check —|The user hasn't heard from you)/;
+
+type Inbound = {text: string; via?: string; thread?: string; system?: boolean};
+
+function unwrap(text: string): Inbound {
+	const m = ENVELOPE.exec(text);
+	if (m) {
+		const out: Inbound = {text: (m[3] ?? '').trim(), via: m[1] ?? 'unknown'};
+		if (m[2]) {
+			out.thread = m[2];
+		}
+
+		return out;
+	}
+
+	const trimmed = text.trim();
+	return SYSTEM_PREFIX.test(trimmed) ? {text: trimmed, system: true} : {text: trimmed};
 }
 
 type Raw = {
@@ -127,7 +149,7 @@ function ingestLine(line: string, state: ParseState, options: TranscriptOptions)
 		const text = flatten(raw.attachment.prompt).trim();
 		if (text) {
 			entries.push({
-				kind: 'incoming', at, queued: true, text: unwrap(text),
+				kind: 'incoming', at, queued: true, ...unwrap(text),
 			});
 		}
 
@@ -137,13 +159,13 @@ function ingestLine(line: string, state: ParseState, options: TranscriptOptions)
 	if (raw.type === 'user') {
 		// A plain string is a real inbound message; an array is tool results.
 		if (typeof content === 'string') {
-			entries.push({kind: 'incoming', at, text: unwrap(content)});
+			entries.push({kind: 'incoming', at, ...unwrap(content)});
 			return;
 		}
 
 		for (const block of asBlocks(content)) {
 			if (block.type === 'text' && typeof block.text === 'string') {
-				entries.push({kind: 'incoming', at, text: unwrap(block.text)});
+				entries.push({kind: 'incoming', at, ...unwrap(block.text)});
 			}
 
 			const call = block.type === 'tool_result' && typeof block.tool_use_id === 'string'

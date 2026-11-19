@@ -176,8 +176,8 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body {
     max-width: min(78%, 620px); padding: 9px 13px; border-radius: 16px; flex: none; font-size: 15px; line-height: 1.45;
   }
-  [data-ui="a"] .row.incoming .body { background: #3b2f14; color: #f4e6c8; border-bottom-right-radius: 5px; }
-  [data-ui="a"] .row.reply .body { background: #1a1e25; border-bottom-left-radius: 5px; }
+  [data-ui="a"] .row.incoming .body { border-bottom-right-radius: 5px; }
+  [data-ui="a"] .row.reply .body { border-bottom-left-radius: 5px; }
   [data-ui="a"] .row.reply.failed .body { outline: 1px solid var(--err); }
   [data-ui="a"] .row.incoming:hover, [data-ui="a"] .row.reply:hover { background: transparent; }
   [data-ui="a"] .row.tool, [data-ui="a"] .row.notes {
@@ -191,7 +191,7 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .row.notes .body { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   [data-ui="a"] #composer { background: rgba(11,12,14,.9); border-top: 0; }
   [data-ui="a"] #composer textarea { border-radius: 20px; padding: 10px 16px; background: #15181e; border-color: #2a2f38; }
-  [data-ui="a"] #composer button { border-radius: 20px; padding: 10px 16px; background: #e0af68; color: #1b1405; border: 0; font-weight: 600; }
+  [data-ui="a"] #composer button { border-radius: 20px; padding: 10px 16px; border: 0; font-weight: 600; }
   @media (max-width: 640px) {
     [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body { max-width: 88%; }
     [data-ui="a"] .row.incoming .t, [data-ui="a"] .row.reply .t { grid-row: auto; }
@@ -265,6 +265,71 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="c"] #composerNote { color: var(--dim); }
   [data-ui="c"] .row.running { background: #eef5e8; }
   [data-ui="c"] .row.queued { background: #f7efdd; }
+
+  /* ---- look a: palette + conversation furniture ---- */
+  [data-ui="a"] {
+    --bg: #101113; --line: #22242a; --text: #e6e8ec; --dim: #8b9099;
+    --me: #2f4f7f; --me-text: #eef3fb; --them: #1c1e23; --accent: #4f8cff;
+  }
+  @media (prefers-color-scheme: light) {
+    [data-ui="a"] {
+      color-scheme: light;
+      --bg: #f6f7f9; --line: #e3e5ea; --text: #1b1d22; --dim: #6f7580;
+      --me: #2f6fde; --me-text: #ffffff; --them: #ffffff; --accent: #2f6fde;
+    }
+    [data-ui="a"] header { background: rgba(246,247,249,.92); }
+    [data-ui="a"] nav a.active, [data-ui="a"] #uiPick a.active { background: #e6e8ee; }
+    [data-ui="a"] .row.reply .body { box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    [data-ui="a"] #composer { background: rgba(246,247,249,.92); }
+    [data-ui="a"] #composer textarea { background: #fff; border-color: #d9dce3; color: var(--text); }
+    [data-ui="a"] .row.tool, [data-ui="a"] .row.notes { border-left-color: #e3e5ea; }
+    [data-ui="a"] pre, [data-ui="a"] .diff .file { background: #eef0f4; color: #30343b; }
+    [data-ui="a"] #jump { background: #fff; color: var(--text); border-color: var(--line); }
+  }
+  [data-ui="a"] body { background: var(--bg); color: var(--text); }
+  [data-ui="a"] header { background: rgba(16,17,19,.9); border-bottom-color: var(--line); }
+  [data-ui="a"] .row.incoming .body { background: var(--me); color: var(--me-text); }
+  [data-ui="a"] .row.reply .body { background: var(--them); }
+  [data-ui="a"] .row.incoming .body a, [data-ui="a"] .row.incoming .body { overflow-wrap: anywhere; }
+  [data-ui="a"] .row.from-group .body { background: #1f3a3a; color: #e6f3f1; }
+  [data-ui="a"] .row.from-group::before { content: 'group'; order: -1; font-size: 11px; color: var(--dim); margin: 0 4px 2px; }
+  [data-ui="a"] .row.from-system { align-items: center; padding: 10px 14px; }
+  [data-ui="a"] .row.from-system .body {
+    max-width: 90%; background: transparent; color: var(--dim); font-size: 12px; text-align: center; padding: 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  [data-ui="a"] .row.from-system.open .body { display: block; }
+  [data-ui="a"] .row.from-system .t { display: none; }
+  [data-ui="a"] .row.pending { display: none; }               /* the optimistic echo stands in */
+  [data-ui="a"] .row.optimistic { display: flex; opacity: 1; }
+  [data-ui="a"] .delivery { font-size: 11px; color: var(--dim); margin: 3px 6px 0; }
+  [data-ui="a"] .run {
+    margin: 2px 14px 2px 22px; padding: 2px 8px; color: var(--dim); font-size: 12px; cursor: pointer; user-select: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; border-radius: 6px; width: fit-content;
+  }
+  [data-ui="a"] .run::before { content: '▸ '; }
+  [data-ui="a"] .run.open::before { content: '▾ '; }
+  [data-ui="a"] .run:hover { background: var(--them); }
+  [data-ui="a"] .run.live { color: var(--accent); }
+  [data-ui="a"] .row.in-run { display: none; }
+  [data-ui="a"] .row.in-run.run-open { display: flex; }
+  [data-ui="a"] .row.tool, [data-ui="a"] .row.notes { border-left-color: var(--line); }
+  [data-ui="a"] .typing { display: flex; gap: 4px; align-items: center; margin: 6px 14px 10px; padding: 12px 14px; background: var(--them); border-radius: 16px; border-bottom-left-radius: 5px; width: fit-content; }
+  [data-ui="a"] .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); animation: tdot 1.2s ease-in-out infinite; }
+  [data-ui="a"] .typing span:nth-child(2) { animation-delay: .2s; }
+  [data-ui="a"] .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes tdot { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+  [data-ui="a"] #clawd { display: none; }
+  [data-ui="a"] .status { font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  [data-ui="a"] .status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); display: inline-block; }
+  [data-ui="a"] .st-working .status::before { background: var(--accent); animation: blink 1.4s ease-in-out infinite; }
+  [data-ui="a"] .st-offline .status::before { background: var(--err); }
+  [data-ui="a"] #composer textarea { background: var(--them); border-color: var(--line); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  [data-ui="a"] #composer textarea:focus { border-color: var(--accent); }
+  [data-ui="a"] #composer button { background: var(--accent); color: #fff; }
+  [data-ui="a"] #composerNote { font-family: system-ui, -apple-system, sans-serif; }
+  [data-ui="a"] .row.reply.failed .body::after { content: ' · not delivered'; color: var(--err); font-size: 12px; }
+  [data-ui="a"] .chat-only .run { display: none; }
 </style>
 <header>
   <h1>AGENT</h1>
@@ -318,7 +383,7 @@ const CHAT = ${chat ? 'true' : 'false'};
 (() => {
   const q = new URLSearchParams(location.search).get('ui');
   if (q) { localStorage.setItem('ui', q); history.replaceState(null, '', location.pathname + location.hash); }
-  const ui = localStorage.getItem('ui') || 'classic';
+  const ui = localStorage.getItem('ui') || 'a';
   document.documentElement.dataset.ui = ui;
   for (const a of document.querySelectorAll('#uiPick a')) a.classList.toggle('active', a.dataset.ui === ui);
 })();
@@ -413,8 +478,10 @@ function buildRow(e, i) {
     const tag = document.createElement('span');
     tag.className = 'tag ' + e.kind;
     // Queued messages arrived mid-turn; worth distinguishing at a glance.
+    const who = e.kind !== 'incoming' ? '' : e.system ? 'system' : (e.thread || '').endsWith('@g.us') ? 'group' : 'adam';
+    if (who) row.classList.add('from-' + who);
     tag.textContent = e.kind === 'incoming'
-      ? (e.queued ? 'adam+' : 'adam')
+      ? (who + (e.queued && who === 'adam' ? '+' : ''))
       : e.kind === 'reply' ? (e.failed ? 'undeliv' : 'reply')
       : e.kind === 'tool' ? (e.failed ? 'error' : 'tool') : e.kind;
     if (e.queued) tag.title = 'sent while a turn was already running';
@@ -545,6 +612,53 @@ function render(entries, from = 0) {
     }
   }
   if (frag.childNodes.length) root.append(frag);
+  groupRuns();
+  syncTyping();
+  reconcileOptimistic();
+}
+
+// Look a folds the agent's work between two conversation messages into one
+// "worked · n steps" line. Rows stay 1:1 with entries; the summaries are
+// extra nodes recomputed after each render (cheap: only the summaries move).
+const openRuns = new Set();
+function groupRuns() {
+  for (const el of root.querySelectorAll('.run')) el.remove();
+  for (const r of rows) r.classList.remove('in-run', 'run-open');
+  if (document.documentElement.dataset.ui !== 'a') return;
+  const isWork = (e) => e && (e.kind === 'tool' || e.kind === 'notes');
+  let i = 0;
+  while (i < latest.length) {
+    if (!isWork(latest[i])) { i++; continue; }
+    let j = i;
+    while (j < latest.length && isWork(latest[j])) j++;
+    const last = j === latest.length; // the run in progress stays open
+    const open = last || openRuns.has(i);
+    const tools = latest.slice(i, j).filter((e) => e.kind === 'tool').length;
+    const ms = Date.parse(latest[j - 1].at) - Date.parse(latest[i].at);
+    const dur = !isFinite(ms) || ms < 1000 ? '' : ms < 60000 ? Math.round(ms / 1000) + 's' : Math.round(ms / 60000) + 'm';
+    const sum = document.createElement('div');
+    sum.className = 'run' + (open ? ' open' : '') + (last && state === 'working' ? ' live' : '');
+    sum.textContent = (last && state === 'working' ? 'working' : 'worked') + ' · ' + tools + (tools === 1 ? ' step' : ' steps') + (dur ? ' · ' + dur : '');
+    sum.addEventListener('click', () => {
+      if (openRuns.has(i)) openRuns.delete(i); else openRuns.add(i);
+      groupRuns();
+    });
+    rows[i].before(sum);
+    for (let k = i; k < j; k++) { rows[k].classList.add('in-run'); if (open) rows[k].classList.add('run-open'); }
+    i = j;
+  }
+}
+
+// A typing-dots bubble at the end while a turn is running (look a).
+let typingEl = null;
+function syncTyping() {
+  const want = document.documentElement.dataset.ui === 'a' && state === 'working' && latest.length > 0;
+  if (want && !typingEl) {
+    typingEl = document.createElement('div');
+    typingEl.className = 'typing';
+    typingEl.innerHTML = '<span></span><span></span><span></span>';
+  }
+  if (want) root.append(typingEl); else if (typingEl) { typingEl.remove(); }
 }
 
 // Body classes: state from the poll loop, view from the URL hash, composer
@@ -564,9 +678,11 @@ function syncBodyClass() {
 window.addEventListener('hashchange', () => { syncBodyClass(); window.scrollTo(0, document.body.scrollHeight); });
 
 function setState(next) {
+  const changed = state !== next;
   state = next;
   syncBodyClass();
   statusEl.textContent = next;
+  if (changed) { groupRuns(); syncTyping(); }
 }
 
 function computeState() {
@@ -617,13 +733,48 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
+// Optimistic echo of a just-sent message. Removed once the same text shows
+// up as a real incoming entry (the agent has it); until then it carries a
+// delivery state like a messaging app would.
+let optimistic = null;
+function showOptimistic(text) {
+  clearOptimistic();
+  const row = document.createElement('div');
+  row.className = 'row incoming from-adam optimistic';
+  const body = document.createElement('span');
+  body.className = 'body';
+  body.textContent = text;
+  const st = document.createElement('span');
+  st.className = 'delivery';
+  st.textContent = 'sent';
+  row.append(body, st);
+  (typingEl && typingEl.parentNode ? typingEl : null)?.before(row) || root.append(row);
+  optimistic = {row, text, at: Date.now()};
+  window.scrollTo(0, document.body.scrollHeight);
+}
+function clearOptimistic() { if (optimistic) { optimistic.row.remove(); optimistic = null; } }
+function reconcileOptimistic() {
+  if (!optimistic) return;
+  const seen = latest.some((e) => e.kind === 'incoming' && e.text === optimistic.text && !e.pending && Date.parse(e.at) >= optimistic.at - 60000);
+  if (seen) { clearOptimistic(); return; }
+  const pending = latest.some((e) => e.kind === 'incoming' && e.text === optimistic.text && e.pending);
+  optimistic.row.querySelector('.delivery').textContent = pending ? 'delivered' : 'sent';
+}
+
 if (CHAT) {
   const form = document.getElementById('composer');
   const box = document.getElementById('message');
   const button = document.getElementById('sendButton');
   const note = document.getElementById('composerNote');
 
-  const grow = () => { box.style.height = 'auto'; box.style.height = box.scrollHeight + 'px'; };
+  const grow = () => {
+    box.style.height = 'auto';
+    const max = Math.round(window.innerHeight * 0.4);
+    box.style.height = Math.min(box.scrollHeight, max) + 'px';
+    // No scrollbar until the text really overflows: an always-on gutter looked broken.
+    box.style.overflowY = box.scrollHeight > max ? 'auto' : 'hidden';
+  };
+  grow();
   box.addEventListener('input', grow);
   // Enter sends, shift+enter is a newline — except on touch keyboards, where
   // there is no shift and the send button is right there.
@@ -649,10 +800,11 @@ if (CHAT) {
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
       box.value = '';
       grow();
-      // The message shows as an adam row once the agent takes it, usually
-      // within a couple of seconds.
-      note.textContent = 'sent — the agent sees it when its current step finishes';
-      setTimeout(() => { if (note.textContent.startsWith('sent')) note.textContent = ''; }, 8000);
+      // Show the message at once, with a delivery state under it: "sent" now,
+      // "seen" once the agent has picked it up (it then appears in the
+      // transcript and the optimistic copy goes away).
+      showOptimistic(text);
+      refresh().catch(() => {});
     } catch (err) {
       note.className = 'err';
       note.textContent = 'not sent: ' + err.message;
