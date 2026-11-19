@@ -3,7 +3,11 @@ name: Publish Docker image
 # The sandbox the agent runs in. Built on every push to master rather than on
 # tags: the image carries no source — it clones the repo at runtime — so it only
 # changes when the tooling inside it does, and there is nothing to version
-# separately from the code it runs.
+# separately from the code it runs. Also rebuilt weekly without the layer
+# cache: the apt layers (Debian base, Google Chrome, gh) only refresh when they
+# actually run, and with a cache they ran once in September and never again
+# (Chrome fell 5 majors behind). A no-cache build picks up current packages;
+# the agent then rolls itself onto the new image.
 
 on:
   push:
@@ -12,6 +16,8 @@ on:
       - 'Dockerfile'
       - 'docker-entrypoint.sh'
       - '.github/workflows/docker.yaml'
+  schedule:
+    - cron: '0 3 * * 1' # Mondays 03:00 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -51,3 +57,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Scheduled and manual runs refresh the apt layers; pushes stay fast.
+          no-cache: ${{ github.event_name != 'push' }}
