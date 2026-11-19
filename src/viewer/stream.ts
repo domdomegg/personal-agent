@@ -135,10 +135,135 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   #composer button:disabled { opacity: .5; cursor: default; }
   #composerNote { position: fixed; left: 14px; bottom: 64px; z-index: 2; color: var(--dim); font-size: 12px; }
   #composerNote.err { color: var(--err); }
+
+  /* ---- cross-cutting polish (all looks) ---- */
+  header { gap: 10px; }
+  nav { display: flex; gap: 2px; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+  nav a { margin: 0; padding: 4px 8px; border-radius: 6px; }
+  nav a.active { border-bottom: 0; background: #1a1d23; }
+  #uiPick { display: flex; gap: 2px; margin-left: 4px; }
+  #uiPick a { color: #4c525c; text-decoration: none; font-size: 11px; padding: 3px 6px; border-radius: 5px; }
+  #uiPick a.active { color: var(--text); background: #1a1d23; }
+  .row.tool .head { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .row.tool.open .head { display: block; }
+  @media (max-width: 640px) {
+    header { padding: 6px 10px; }
+    header h1 { display: none; }
+    .status { font-size: 12px; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 0; padding: 6px 10px; }
+    .row .t { font-size: 11px; }
+    .row .tag { width: auto; font-size: 11px; }
+    .row .t, .row .tag { display: inline; }
+    .row .body { grid-column: 1 / -1; }
+    .row .t::after { content: ' · '; color: #3a3f47; }
+    .row .t, .row .tag { grid-row: 1; }
+    .row { grid-template-columns: auto auto 1fr; }
+    .row .tag { grid-column: 2 / -1; }
+  }
+
+  /* ---- look A: chat-first (claude.ai / iMessage) ---- */
+  [data-ui="a"] body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  [data-ui="a"] main { max-width: 820px; margin: 0 auto; padding: 10px 0 150px; }
+  [data-ui="a"] .row.incoming, [data-ui="a"] .row.reply { display: flex; flex-direction: column; padding: 6px 14px; }
+  [data-ui="a"] .row.incoming { align-items: flex-end; }
+  [data-ui="a"] .row.reply { align-items: flex-start; }
+  [data-ui="a"] .row.incoming .t, [data-ui="a"] .row.reply .t { order: 3; font-size: 11px; margin-top: 3px; color: #4c525c; }
+  [data-ui="a"] .row.incoming .tag, [data-ui="a"] .row.reply .tag { display: none; }
+  [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body {
+    max-width: min(78%, 620px); padding: 9px 13px; border-radius: 16px; flex: none; font-size: 15px; line-height: 1.45;
+  }
+  [data-ui="a"] .row.incoming .body { background: #3b2f14; color: #f4e6c8; border-bottom-right-radius: 5px; }
+  [data-ui="a"] .row.reply .body { background: #1a1e25; border-bottom-left-radius: 5px; }
+  [data-ui="a"] .row.reply.failed .body { outline: 1px solid var(--err); }
+  [data-ui="a"] .row.incoming:hover, [data-ui="a"] .row.reply:hover { background: transparent; }
+  [data-ui="a"] .row.tool, [data-ui="a"] .row.notes {
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 14px 1px 24px; color: var(--dim);
+    border-left: 2px solid #1e2126; margin-left: 14px;
+  }
+  [data-ui="a"] .row.tool .t, [data-ui="a"] .row.notes .t { display: none; }
+  [data-ui="a"] .row.tool .tag { width: 38px; font-size: 11px; }
+  [data-ui="a"] .row.tool .head { -webkit-line-clamp: 1; }
+  [data-ui="a"] .row.tool .body b { color: #9aa3b2; }
+  [data-ui="a"] .row.notes .body { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  [data-ui="a"] #composer { background: rgba(11,12,14,.9); border-top: 0; }
+  [data-ui="a"] #composer textarea { border-radius: 20px; padding: 10px 16px; background: #15181e; border-color: #2a2f38; }
+  [data-ui="a"] #composer button { border-radius: 20px; padding: 10px 16px; background: #e0af68; color: #1b1405; border: 0; font-weight: 600; }
+  @media (max-width: 640px) {
+    [data-ui="a"] .row.incoming .body, [data-ui="a"] .row.reply .body { max-width: 88%; }
+    [data-ui="a"] .row.incoming .t, [data-ui="a"] .row.reply .t { grid-row: auto; }
+    [data-ui="a"] .row.incoming, [data-ui="a"] .row.reply { display: flex; }
+  }
+
+  /* ---- look B: refined console (Warp / Linear) ---- */
+  [data-ui="b"] body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  [data-ui="b"] header, [data-ui="b"] nav a, [data-ui="b"] .status, [data-ui="b"] .tag, [data-ui="b"] #composer button {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  [data-ui="b"] header h1 { letter-spacing: .12em; font-size: 11px; color: var(--dim); }
+  [data-ui="b"] main { padding-top: 8px; }
+  [data-ui="b"] .row { padding: 2px 16px 2px 12px; gap: 12px; border-left: 2px solid transparent; }
+  [data-ui="b"] .row .t { font-size: 11px; opacity: .7; }
+  [data-ui="b"] .tag { width: 56px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding-top: 1px; }
+  [data-ui="b"] .row.tool { border-left-color: #202a3d; color: #9aa3b2; }
+  [data-ui="b"] .row.tool + .row.tool { margin-top: -1px; }
+  [data-ui="b"] .row.tool .head { -webkit-line-clamp: 1; }
+  [data-ui="b"] .row.tool .body b { color: #c3cbd6; }
+  [data-ui="b"] .row.notes { border-left-color: #1e2126; }
+  [data-ui="b"] .row.incoming, [data-ui="b"] .row.reply {
+    margin: 8px 10px; padding: 10px 12px; border-radius: 8px; border-left: 2px solid;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  [data-ui="b"] .row.incoming { background: #15130d; border-left-color: var(--in); }
+  [data-ui="b"] .row.reply { background: #10150f; border-left-color: var(--reply); }
+  [data-ui="b"] .row.incoming .t, [data-ui="b"] .row.reply .t { font-family: ui-monospace, Menlo, monospace; }
+  [data-ui="b"] pre, [data-ui="b"] .diff { border-radius: 6px; border-left: 0; background: #0e1116; }
+  [data-ui="b"] #composer textarea { border-radius: 8px; }
+
+  /* ---- look C: paper (Notion / Things) ---- */
+  [data-ui="c"] {
+    color-scheme: light;
+    --bg: #faf8f3; --line: #e6e1d6; --text: #27241d; --dim: #8a8477;
+    --tool: #3b6fb6; --reply: #2f7d4a; --in: #a4601a; --err: #b8323a;
+    --add: #e3f2e3; --add-text: #1e5a2a; --del: #f8e1e1; --del-text: #7a1f26;
+  }
+  [data-ui="c"] body { font: 16px/1.55 Georgia, "Iowan Old Style", "Palatino Linotype", serif; color: var(--text); background: var(--bg); }
+  [data-ui="c"] header { background: rgba(250,248,243,.94); border-bottom-color: var(--line); }
+  [data-ui="c"] header h1 { font-family: Georgia, serif; font-weight: 600; letter-spacing: .02em; font-size: 15px; }
+  [data-ui="c"] nav a, [data-ui="c"] #uiPick a, [data-ui="c"] .status, [data-ui="c"] .tag, [data-ui="c"] .t, [data-ui="c"] #composer button {
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  [data-ui="c"] nav a.active, [data-ui="c"] #uiPick a.active { background: #ece7db; }
+  [data-ui="c"] main { max-width: 760px; margin: 0 auto; padding: 14px 0 150px; }
+  [data-ui="c"] .row:hover { background: transparent; }
+  [data-ui="c"] .row.incoming, [data-ui="c"] .row.reply {
+    display: block; margin: 10px 14px; padding: 14px 18px; background: #fff; border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: 0 1px 2px rgba(60,50,30,.06);
+  }
+  [data-ui="c"] .row.incoming { background: #fff8ec; }
+  [data-ui="c"] .row.incoming .t, [data-ui="c"] .row.reply .t, [data-ui="c"] .row.incoming .tag, [data-ui="c"] .row.reply .tag {
+    display: inline; color: var(--dim); font-size: 12px; width: auto; margin-right: 8px;
+  }
+  [data-ui="c"] .row.incoming .body, [data-ui="c"] .row.reply .body { display: block; margin-top: 4px; }
+  [data-ui="c"] .row.tool, [data-ui="c"] .row.notes {
+    font: 12px/1.45 ui-monospace, Menlo, monospace; color: var(--dim); padding: 2px 14px 2px 32px;
+  }
+  [data-ui="c"] .row.tool .t { color: #b5afa2; }
+  [data-ui="c"] .row.tool .body b { color: #5b5648; }
+  [data-ui="c"] .row.tool .head { -webkit-line-clamp: 1; }
+  [data-ui="c"] pre, [data-ui="c"] .diff .file { background: #f1ede4; color: #3d3a32; border-color: var(--line); }
+  [data-ui="c"] .diff { border-color: var(--line); }
+  [data-ui="c"] #jump { background: #fff; color: var(--text); border-color: var(--line); box-shadow: 0 4px 16px rgba(60,50,30,.15); }
+  [data-ui="c"] #composer { background: rgba(250,248,243,.96); border-top-color: var(--line); }
+  [data-ui="c"] #composer textarea { background: #fff; color: var(--text); border-color: #d9d3c6; border-radius: 12px; font-family: Georgia, serif; }
+  [data-ui="c"] #composer button { background: #27241d; color: #faf8f3; border: 0; border-radius: 12px; }
+  [data-ui="c"] #composerNote { color: var(--dim); }
+  [data-ui="c"] .row.running { background: #eef5e8; }
+  [data-ui="c"] .row.queued { background: #f7efdd; }
 </style>
 <header>
   <h1>AGENT</h1>
   <nav><a id="navActivity" class="active" href="/">activity</a>${chat ? ' <a id="navChat" href="/#chat">chat</a>' : ''} <a href="/desktop" target="_blank">desktop</a> <a href="/connect">connect</a></nav>
+  <span id="uiPick" title="try a different look"><a href="?ui=classic" data-ui="classic">classic</a><a href="?ui=a" data-ui="a">a</a><a href="?ui=b" data-ui="b">b</a><a href="?ui=c" data-ui="c">c</a></span>
   <span class="status">
     <!-- Clawd, measured off the official sticker art (run-length analysis of
          the pixel grid): 12x8 units — 8x6 body, eyes 1 in from each edge on
@@ -182,6 +307,20 @@ export function streamPage(options: {chat?: boolean} = {}): string {
 ${chat ? COMPOSER : ''}
 <script>
 const CHAT = ${chat ? 'true' : 'false'};
+// Look variants, for comparing side by side: ?ui=a|b|c|classic sticks per
+// device (localStorage) so a phone and a laptop can run different ones.
+(() => {
+  const q = new URLSearchParams(location.search).get('ui');
+  if (q) { localStorage.setItem('ui', q); history.replaceState(null, '', location.pathname + location.hash); }
+  const ui = localStorage.getItem('ui') || 'classic';
+  document.documentElement.dataset.ui = ui;
+  for (const a of document.querySelectorAll('#uiPick a')) a.classList.toggle('active', a.dataset.ui === ui);
+})();
+// Long tool commands are clamped; tap the head to see the whole thing.
+document.addEventListener('click', (ev) => {
+  const head = ev.target.closest('.row.tool .head');
+  if (head) head.closest('.row').classList.toggle('open');
+});
 const root = document.getElementById('root');
 const statusEl = document.getElementById('status');
 const jump = document.getElementById('jump');
@@ -282,6 +421,7 @@ function buildRow(e, i) {
 
     if (e.kind === 'tool') {
       const head = document.createElement('div');
+      head.className = 'head';
       const name = document.createElement('b');
       name.textContent = e.name;
       head.append(name, ' ' + (e.input || ''));
