@@ -330,6 +330,13 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] #composerNote { font-family: system-ui, -apple-system, sans-serif; }
   [data-ui="a"] .row.reply.failed .body::after { content: ' · not delivered'; color: var(--err); font-size: 12px; }
   [data-ui="a"] .chat-only .run { display: none; }
+
+  /* look a: no row tints behind bubbles; chat view hides work even mid-run; no meta dot */
+  [data-ui="a"] .row.queued, [data-ui="a"] .row.running, [data-ui="a"] .row:hover { background: transparent; }
+  [data-ui="a"] .row.tool.running { background: var(--them); }
+  [data-ui="a"] .chat-only .row.in-run.run-open, [data-ui="a"] .chat-only .typing ~ .run { display: none; }
+  [data-ui="a"] .chat-only .row.tool, [data-ui="a"] .chat-only .row.notes { display: none; }
+  @media (max-width: 640px) { [data-ui="a"] .row .t::after { content: none; } }
 </style>
 <header>
   <h1>AGENT</h1>
@@ -638,7 +645,8 @@ function groupRuns() {
     const dur = !isFinite(ms) || ms < 1000 ? '' : ms < 60000 ? Math.round(ms / 1000) + 's' : Math.round(ms / 60000) + 'm';
     const sum = document.createElement('div');
     sum.className = 'run' + (open ? ' open' : '') + (last && state === 'working' ? ' live' : '');
-    sum.textContent = (last && state === 'working' ? 'working' : 'worked') + ' · ' + tools + (tools === 1 ? ' step' : ' steps') + (dur ? ' · ' + dur : '');
+    const verb = last && state === 'working' ? 'working' : (tools ? 'worked' : 'thought');
+    sum.textContent = verb + (tools ? ' · ' + tools + (tools === 1 ? ' step' : ' steps') : '') + (dur ? ' · ' + dur : '');
     sum.addEventListener('click', () => {
       if (openRuns.has(i)) openRuns.delete(i); else openRuns.add(i);
       groupRuns();
