@@ -68,7 +68,7 @@ const REPLY_MARKER = /^>>> reply channel=\S+ thread=\S+[ \t]*\n?/m;
 const ENVELOPE = /^\[message via ([^\]\s—]+)(?: — reply to thread (\S+))?\](?:\nfrom: \S+)?\n<<<MESSAGE\n([\s\S]*?)\n\s*MESSAGE\s*$/;
 
 /** Things the service itself injects into the conversation, not people. */
-const SYSTEM_PREFIX = /^\s*(\[system notice\]|\[scheduled task|\[SYSTEM NOTIFICATION|Reply check —|The user hasn't heard from you)/;
+const SYSTEM_PREFIX = /^\s*(\[system notice\]|\[scheduled task|\[SYSTEM NOTIFICATION|Reply check —|The user hasn't heard from you|<task-notification>|<local-command-caveat>|<local-command-stdout>|<command-name>|<system-reminder>)/;
 
 type Inbound = {text: string; via?: string; thread?: string; system?: boolean};
 
@@ -90,6 +90,8 @@ function unwrap(text: string): Inbound {
 type Raw = {
 	type?: string;
 	timestamp?: string;
+	/** Claude Code's compaction summary: injected as a user message, not from a person. */
+	isCompactSummary?: boolean;
 	message?: {
 		role?: string;
 		content?: unknown;
@@ -159,7 +161,12 @@ function ingestLine(line: string, state: ParseState, options: TranscriptOptions)
 	if (raw.type === 'user') {
 		// A plain string is a real inbound message; an array is tool results.
 		if (typeof content === 'string') {
-			entries.push({kind: 'incoming', at, ...unwrap(content)});
+			const inbound = unwrap(content);
+			if (raw.isCompactSummary) {
+				inbound.system = true;
+			}
+
+			entries.push({kind: 'incoming', at, ...inbound});
 			return;
 		}
 

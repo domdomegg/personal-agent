@@ -211,3 +211,12 @@ test('incremental reader: appends, back-fills results, and re-reads a partial la
 	expect(reset.map((e) => (e as {name?: string}).name)).toEqual(['Read']);
 	expect(reset).not.toBe(first);
 });
+
+test('a compaction summary is a system entry, not a message from the owner', async () => {
+	const path = write([{
+		type: 'user', isCompactSummary: true, timestamp: '2026-11-19T04:23:14.003Z',
+		message: {role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. Summary: ...'},
+	}]);
+	const [entry] = await readTranscript(path);
+	expect(entry).toMatchObject({kind: 'incoming', system: true});
+});
