@@ -149,6 +149,10 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   @media (max-width: 640px) {
     header { padding: 6px 10px; }
     header h1 { display: none; }
+    nav { flex: 1; min-width: 0; }
+    nav a[href="/connect"] { display: none; }
+    #uiPick a[data-ui="classic"] { display: none; }
+    .status { flex: none; }
     .status { font-size: 12px; }
     .row { display: grid; grid-template-columns: 1fr; gap: 0; padding: 6px 10px; }
     .row .t { font-size: 11px; }
@@ -209,6 +213,8 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="b"] .row.tool .head { -webkit-line-clamp: 1; }
   [data-ui="b"] .row.tool .body b { color: #c3cbd6; }
   [data-ui="b"] .row.notes { border-left-color: #1e2126; }
+  [data-ui="b"] .row.notes .body { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  [data-ui="b"] .row.notes.open .body { display: block; }
   [data-ui="b"] .row.incoming, [data-ui="b"] .row.reply {
     margin: 8px 10px; padding: 10px 12px; border-radius: 8px; border-left: 2px solid;
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -318,7 +324,7 @@ const CHAT = ${chat ? 'true' : 'false'};
 })();
 // Long tool commands are clamped; tap the head to see the whole thing.
 document.addEventListener('click', (ev) => {
-  const head = ev.target.closest('.row.tool .head');
+  const head = ev.target.closest('.row.tool .head, .row.notes .body');
   if (head) head.closest('.row').classList.toggle('open');
 });
 const root = document.getElementById('root');
