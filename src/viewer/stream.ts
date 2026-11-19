@@ -315,9 +315,10 @@ export function streamPage(options: {chat?: boolean} = {}): string {
   [data-ui="a"] .row.in-run.run-open { display: flex; }
   [data-ui="a"] .row.tool, [data-ui="a"] .row.notes { border-left-color: var(--line); }
   [data-ui="a"] .typing { display: flex; gap: 4px; align-items: center; margin: 6px 14px 10px; padding: 12px 14px; background: var(--them); border-radius: 16px; border-bottom-left-radius: 5px; width: fit-content; }
-  [data-ui="a"] .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); animation: tdot 1.2s ease-in-out infinite; }
-  [data-ui="a"] .typing span:nth-child(2) { animation-delay: .2s; }
-  [data-ui="a"] .typing span:nth-child(3) { animation-delay: .4s; }
+  [data-ui="a"] .typing span:not(.lbl) { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); animation: tdot 1.2s ease-in-out infinite; }
+  [data-ui="a"] .typing span:nth-child(2):not(.lbl) { animation-delay: .2s; }
+  [data-ui="a"] .typing span:nth-child(3):not(.lbl) { animation-delay: .4s; }
+  [data-ui="a"] .typing .lbl { white-space: nowrap; }
   @keyframes tdot { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
   [data-ui="a"] #clawd { display: none; }
   [data-ui="a"] .status { font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
